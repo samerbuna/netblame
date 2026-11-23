@@ -62,7 +62,9 @@ function ping(host: string, timeoutMs: number): Promise<Ms> {
   // -W is milliseconds on macOS, whole seconds on Linux.
   const wait = process.platform === 'darwin' ? String(timeoutMs) : String(Math.max(1, Math.ceil(timeoutMs / 1000)));
   return new Promise((resolve) => {
-    execFile('ping', ['-c', '1', '-n', '-W', wait, host], { timeout: timeoutMs + 1000 }, (err, stdout) => {
+    // LC_ALL=C: a localized ping (iputils on Linux) can print "Zeit=" or "12,3 ms", which the regex would miss.
+    const env = { ...process.env, LC_ALL: 'C' };
+    execFile('ping', ['-c', '1', '-n', '-W', wait, host], { timeout: timeoutMs + 1000, env }, (err, stdout) => {
       if (err) return resolve(null);
       const m = /time[=<]([\d.]+)\s*ms/.exec(stdout);
       resolve(m ? round(Number(m[1])) : null);
