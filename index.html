@@ -421,6 +421,16 @@
     return samples.slice(i);
   }
 
+  // When the time sample i stands for ends: at the next sample, one tick later if the
+  // record stops there, or now for the latest sample while the monitor is running.
+  // These are the same ends outages() uses, so the tiles agree with the outage table.
+  function sampleEnd(i, now) {
+    const x = samples[i];
+    const next = samples[i + 1];
+    if (next) return contiguous(x, next) ? next.t : x.t + config.tickMs;
+    return currentStatus() !== 'idle' ? now : x.t + config.tickMs;
+  }
+
   function renderTiles() {
     const win = windowSamples();
     const label = fmtRange(rangeMs);
@@ -429,15 +439,25 @@
       for (const id of ['t-uptime-sub', 't-outages-sub', 't-latency-sub', 't-loss-sub']) $(id).textContent = `no checks in the last ${label}`;
       return;
     }
-    const down = win.filter((x) => x.s === 'down').length;
-    const up = ((win.length - down) / win.length) * 100;
+    // Uptime by time, not by sample count: rounds take longer during an outage
+    // (checks wait for timeouts), so offline samples are sparser than online ones.
+    // Start one sample before the window, whose time may run into it.
+    const now = Date.now();
+    const from = now - rangeMs;
+    let observedMs = 0;
+    let downMs = 0;
+    for (let i = Math.max(0, samples.length - win.length - 1); i < samples.length; i++) {
+      const span = Math.min(sampleEnd(i, now), now) - Math.max(samples[i].t, from);
+      if (span <= 0) continue;
+      observedMs += span;
+      if (samples[i].s === 'down') downMs += span;
+    }
+    const up = observedMs ? ((observedMs - downMs) / observedMs) * 100 : 100;
     // Never round up to 100 when there was any downtime.
-    setTile('t-uptime', !down ? '100' : up >= 99 ? Math.min(up, 99.99).toFixed(2) : up.toFixed(1), '%');
+    setTile('t-uptime', !downMs ? '100' : up >= 99 ? Math.min(up, 99.99).toFixed(2) : up.toFixed(1), '%');
     $('t-uptime-sub').textContent = `${win.length.toLocaleString()} checks, last ${label}`;
 
-    const from = Date.now() - rangeMs;
     const outs = outages().filter((o) => o.end > from);
-    const downMs = outs.reduce((sum, o) => sum + (o.end - Math.max(o.start, from)), 0);
     setTile('t-outages', String(outs.length), '');
     $('t-outages-sub').textContent = outs.length ? `${fmtDur(downMs)} offline in total` : `none in the last ${label}`;
 
