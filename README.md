@@ -7,7 +7,7 @@ node monitor.ts        # or: npm start
 open http://localhost:4321
 ```
 
-Needs Node 23.6 or newer, which runs the `.ts` file directly. There are no dependencies. Works on macOS and Linux.
+Needs Node 22.18 or newer, which runs the `.ts` file directly. There are no dependencies. Works on macOS and Linux.
 
 ## What it checks
 

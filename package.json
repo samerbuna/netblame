@@ -2,7 +2,7 @@
   "name": "net-monitor",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=23.6" },
+  "engines": { "node": ">=22.18" },
   "scripts": {
     "start": "node monitor.ts"
   }
