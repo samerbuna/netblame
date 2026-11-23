@@ -103,8 +103,11 @@ function httpCheck(timeoutMs: number): Promise<HttpResult> {
     // agent: false opens a fresh connection each time, so a stale keep-alive socket can't hide a problem.
     const req = http.get(HTTP_URL, { agent: false, headers: { 'Cache-Control': 'no-cache' } }, (res) => {
       res.resume();
-      const ok = res.statusCode === 204;
-      finish({ ms: ok ? round(performance.now() - t0) : null, portal: !ok });
+      const code = res.statusCode ?? 0;
+      const ok = code === 204;
+      // A page or redirect instead of the empty 204 means something intercepted the request.
+      // A 5xx is the check server failing, which is a failed check, not a portal.
+      finish({ ms: ok ? round(performance.now() - t0) : null, portal: !ok && code < 500 });
     });
     req.on('error', () => finish({ ms: null, portal: false }));
     const timer = setTimeout(() => finish({ ms: null, portal: false }), timeoutMs);
