@@ -109,17 +109,24 @@ function httpCheck(timeoutMs: number): Promise<HttpResult> {
   });
 }
 
-function findGateway(): Promise<string | null> {
-  const [cmd, args, re] = process.platform === 'darwin'
-    ? ['route', ['-n', 'get', 'default'], /gateway:\s*(\d+\.\d+\.\d+\.\d+)/]
-    : ['ip', ['-4', 'route', 'show', 'default'], /default via (\d+\.\d+\.\d+\.\d+)/];
+function firstMatch(cmd: string, args: string[], re: RegExp): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(cmd as string, args as string[], { timeout: 2000 }, (err, stdout) => {
+    execFile(cmd, args, { timeout: 2000 }, (err, stdout) => {
       if (err) return resolve(null);
-      const m = (re as RegExp).exec(stdout);
+      const m = re.exec(stdout);
       resolve(m ? m[1] : null);
     });
   });
+}
+
+async function findGateway(): Promise<string | null> {
+  if (process.platform !== 'darwin') {
+    return firstMatch('ip', ['-4', 'route', 'show', 'default'], /default via (\d+\.\d+\.\d+\.\d+)/);
+  }
+  // A VPN that takes over the default route points it at a tunnel interface with no gateway.
+  // The physical router's default route is still in the table, scoped to its interface.
+  return await firstMatch('route', ['-n', 'get', 'default'], /gateway:\s*(\d+\.\d+\.\d+\.\d+)/)
+    ?? firstMatch('netstat', ['-rn', '-f', 'inet'], /^default\s+(\d+\.\d+\.\d+\.\d+)\s/m);
 }
 
 // ---------- monitor state ----------
