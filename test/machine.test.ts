@@ -47,3 +47,22 @@ test('parseProcStat: counts fields from the last ")" so odd names parse', () => 
   assert.deepEqual(parseProcStat(`42 (my) (weird) name) ${rest}`), { pid: 42, name: 'my) (weird) name', ticks: 200, rssPages: 2500 });
   assert.equal(parseProcStat('garbage'), null);
 });
+
+test('machineStatus: macOS memory pressure replaces the 90% rule', () => {
+  assert.equal(machineStatus(series({ mem: 95, mp: 1 })).s, 'up');
+  const high = machineStatus(series({ mem: 70, mp: 2 }));
+  assert.deepEqual([high.s, high.w, high.r], ['warn', ['mem'], 'Memory pressure high (70% in use)']);
+  assert.match(machineStatus(series({ mp: 4 })).r!, /Memory pressure critical/);
+  // elevated for under half the window
+  const brief = [...series({ mp: 1 }, 5), ...series({ mp: 2 }, 2).map((x, i) => ({ ...x, t: 50_000 + i * 10_000 }))];
+  assert.equal(machineStatus(brief).s, 'up');
+});
+
+test('machineStatus: weak Wi-Fi, averaged, only while on Wi-Fi', () => {
+  const weak = machineStatus(series({ rssi: -80 }));
+  assert.deepEqual([weak.s, weak.w, weak.r], ['warn', ['wifi'], 'Weak Wi-Fi signal (-80 dBm)']);
+  assert.equal(machineStatus(series({ rssi: -70 })).s, 'up');
+  assert.equal(machineStatus(series({ rssi: -75 })).s, 'up');
+  // moved to Ethernet: the latest sample has no Wi-Fi reading
+  assert.equal(machineStatus([...series({ rssi: -85 }, 6), { t: 60_000, ...base }]).s, 'up');
+});

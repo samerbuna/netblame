@@ -1,21 +1,23 @@
-// Machine health: CPU, memory, swap, disk, network throughput, battery and thermal throttling.
-// Everything comes from node:os, /proc and /sys on Linux, and a few stock commands on macOS
-// (sysctl, vm_stat, netstat, pmset, ps). No sudo.
+// Machine health: CPU, memory, swap, disk, network throughput, Wi-Fi signal, battery and
+// thermal throttling. Everything comes from node:os, /proc and /sys on Linux, and a few stock
+// commands on macOS (sysctl, vm_stat, netstat, pmset, ps, osascript). No sudo.
 
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { run, readText } from './exec.ts';
+import { readWifi } from './wifi.ts';
 
 // Thresholds for calling the machine degraded.
 export const LIMITS = {
   diskGb: 5,         // free space below this many GB, on any disk ...
   diskPct: 10,       // ... or below this % while also below diskPctGb, so a big disk
   diskPctGb: 50,     //     with hundreds of GB free doesn't count as full
-  memPct: 90,        // memory in use, averaged over the window
+  memPct: 90,        // memory in use, averaged over the window (Linux; macOS uses its pressure level)
   swapOutKBs: 1024,  // swap-out rate, averaged over the window
   cpuPct: 90,        // CPU busy, averaged over the window
   batteryPct: 10,    // battery below this % and not on power
+  wifiDbm: -75,      // Wi-Fi signal below this, averaged over the window
 };
 export const WINDOW_MS = 60_000;     // CPU, memory and swap are judged over this much history ...
 
@@ -36,6 +38,11 @@ export interface MachineSample {
   dgb: number | null;   // GB free on the watched disk
   rx: number | null;    // bytes/s received on the active network interface
   tx: number | null;    // bytes/s sent
+  mp?: number;          // macOS memory pressure level: 1 normal, 2 warning, 4 critical
+  rssi?: number;        // Wi-Fi signal in dBm, present only when the router is reached over Wi-Fi
+  noise?: number;       // Wi-Fi noise in dBm
+  rate?: number;        // Wi-Fi transmit rate in Mbps
+  ch?: number;          // Wi-Fi channel
   bat?: number;         // battery %, absent on machines without one
   ac?: 0 | 1;           // 1 when on power
   hot?: 1;              // CPU slowed down for heat
@@ -43,7 +50,7 @@ export interface MachineSample {
   w?: WarnKey[];        // which readings are over their limit, when status is "warn"
 }
 
-export type WarnKey = 'disk' | 'mem' | 'swap' | 'cpu' | 'bat' | 'hot';
+export type WarnKey = 'disk' | 'mem' | 'swap' | 'cpu' | 'bat' | 'hot' | 'wifi';
 
 export type Reading = Omit<MachineSample, 't' | 's' | 'r' | 'w'>;
 
@@ -102,11 +109,18 @@ export function createCollector(diskPath: string, intervalMs: number) {
   }
 
   // Memory % in use, swap MB in use, cumulative swap-out bytes.
-  async function memory(): Promise<{ mem: number | null; swap: number | null; swapOut: number | null }> {
+  async function memory(): Promise<{ mem: number | null; swap: number | null; swapOut: number | null; mp?: number }> {
     if (isMac) {
       // os.freemem() counts cached memory as used on macOS, so it reads near zero on a healthy Mac.
-      // kern.memorystatus_level is the % available that memory pressure is based on.
-      const [sys, vm] = await Promise.all([run('sysctl', ['-n', 'kern.memorystatus_level', 'vm.swapusage']), run('vm_stat', [])]);
+      // kern.memorystatus_level is the % available that memory pressure is based on, and the
+      // pressure level is what Activity Monitor colors its memory graph by. It's read on its own
+      // so a macOS without it can't fail the other two.
+      const [sys, vm, pressure] = await Promise.all([
+        run('sysctl', ['-n', 'kern.memorystatus_level', 'vm.swapusage']),
+        run('vm_stat', []),
+        run('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level']),
+      ]);
+      const mp = Number(pressure);
       const level = sys ? Number(sys.split('\n')[0]) : NaN;
       const used = sys ? /used = ([\d.]+)([MG])/.exec(sys) : null;
       const page = vm ? /page size of (\d+) bytes/.exec(vm) : null;
@@ -115,6 +129,7 @@ export function createCollector(diskPath: string, intervalMs: number) {
         mem: Number.isFinite(level) && level >= 0 && level <= 100 ? 100 - level : null,
         swap: used ? round(Number(used[1]) * (used[2] === 'G' ? 1024 : 1)) : null,
         swapOut: outs && page ? Number(outs[1]) * Number(page[1]) : null,
+        ...(mp === 1 || mp === 2 || mp === 4 ? { mp } : {}),
       };
     }
     const [info, vmstat, { page }] = await Promise.all([readText('/proc/meminfo'), readText('/proc/vmstat'), sysconf()]);
@@ -209,10 +224,11 @@ export function createCollector(diskPath: string, intervalMs: number) {
     // Everything is read at once. Reading battery and thermal (pmset can take up to its timeout)
     // before the counters would delay them past `now`, so their rates would cover the wrong span.
     const slowDue = now - slowAt >= SLOW_EVERY_MS;
-    const [m, d, net, b, h] = await Promise.all([
+    const [m, d, net, wifi, b, h] = await Promise.all([
       memory(),
       disk(),
       iface ? netCounters(iface) : Promise.resolve(null),
+      readWifi(iface),
       slowDue ? battery() : Promise.resolve(null),
       slowDue ? thermal() : Promise.resolve(null),
     ]);
@@ -237,7 +253,15 @@ export function createCollector(diskPath: string, intervalMs: number) {
     prevNet = net && iface ? { iface, ...net } : null;
     prevAt = now;
 
-    return { cpu, load: round(os.loadavg()[0], 2), mem: m.mem, swap: m.swap, so, ...d, rx, tx, ...slow };
+    const link: Pick<Reading, 'rssi' | 'noise' | 'rate' | 'ch'> = {};
+    if (wifi) {
+      link.rssi = wifi.rssi;
+      if (wifi.noise !== null) link.noise = wifi.noise;
+      if (wifi.rate !== null) link.rate = wifi.rate;
+      if (wifi.ch !== null) link.ch = wifi.ch;
+    }
+    const mp = m.mp === undefined ? {} : { mp: m.mp };
+    return { cpu, load: round(os.loadavg()[0], 2), mem: m.mem, swap: m.swap, so, ...d, rx, tx, ...mp, ...link, ...slow };
   }
 
   // macOS ps reports recent CPU use per process.
@@ -318,15 +342,15 @@ export function parseProcStat(text: string): { pid: number; name: string; ticks:
 // recent: the machine samples from the last windowMs (see judgingWindow), oldest first, ending with the one being judged.
 // CPU, memory and swap are averaged so a short spike doesn't count, and they're only judged once
 // the window is mostly covered (not right after start or wake).
-export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 'so' | 'disk' | 'dgb' | 'bat' | 'ac' | 'hot'>[], windowMs = WINDOW_MS): { s: 'up' | 'warn'; r?: string; w?: WarnKey[] } {
+export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 'so' | 'disk' | 'dgb' | 'bat' | 'ac' | 'hot' | 'mp' | 'rssi'>[], windowMs = WINDOW_MS): { s: 'up' | 'warn'; r?: string; w?: WarnKey[] } {
   const x = recent[recent.length - 1];
   if (!x) return { s: 'up' };
   const covered = x.t - recent[0].t >= windowMs * 0.75;
   const over = windowMs <= 60_000 ? 'the last minute'
     : windowMs < 120_000 ? `the last ${Math.round(windowMs / 1000)} seconds`
     : `the last ${Math.round(windowMs / 60_000)} minutes`;
-  const avg = (key: 'cpu' | 'mem' | 'so') => {
-    const vals = recent.map((y) => y[key]).filter((v): v is number => v !== null);
+  const avg = (key: 'cpu' | 'mem' | 'so' | 'rssi') => {
+    const vals = recent.map((y) => y[key]).filter((v): v is number => v !== null && v !== undefined);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
 
@@ -343,9 +367,19 @@ export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 
     const mem = avg('mem');
     const so = avg('so');
     const cpu = avg('cpu');
-    if (mem !== null && mem > LIMITS.memPct) warn('mem', `Memory almost full (${Math.round(mem)}% in use)`);
+    // macOS says how hard it's working to free memory; elsewhere, judge by how much is in use.
+    const levels = recent.map((y) => y.mp).filter((v): v is number => v !== undefined);
+    if (levels.length) {
+      const high = levels.filter((v) => v >= 2).length;
+      if (high >= levels.length / 2) {
+        warn('mem', `Memory pressure ${levels[levels.length - 1] >= 4 ? 'critical' : 'high'}${mem === null ? '' : ` (${Math.round(mem)}% in use)`}`);
+      }
+    } else if (mem !== null && mem > LIMITS.memPct) warn('mem', `Memory almost full (${Math.round(mem)}% in use)`);
     if (so !== null && so > LIMITS.swapOutKBs) warn('swap', `Swapping heavily (${(so / 1024).toFixed(1)} MB/s to disk)`);
     if (cpu !== null && cpu > LIMITS.cpuPct) warn('cpu', `CPU busy (${Math.round(cpu)}% over ${over})`);
+    // Only while the latest sample is on Wi-Fi: after moving to Ethernet, old weak readings don't count.
+    const rssi = x.rssi === undefined ? null : avg('rssi');
+    if (rssi !== null && rssi < LIMITS.wifiDbm) warn('wifi', `Weak Wi-Fi signal (${Math.round(rssi)} dBm)`);
   }
   if (x.bat !== undefined && x.ac === 0 && x.bat < LIMITS.batteryPct) warn('bat', `Battery low (${x.bat}%)`);
   if (x.hot) warn('hot', 'CPU slowed down for heat');

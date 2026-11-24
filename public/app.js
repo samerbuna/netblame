@@ -8,6 +8,7 @@ const ICONS = { up: '✓', warn: '!', down: '✕', idle: '…' };
 
 let config = { tickMs: 3000, gapMs: 11000, pingHost: '1.1.1.1', httpUrl: '', httpEveryMs: 30000, machineMs: 10000, machineGapMs: 30000, diskPath: '/' };
 let gateway = null;
+let iface = null; // the interface the router is reached on
 let samples = [];
 let machine = []; // machine health samples, same 24 hours
 let procs = null; // latest top processes, live only
@@ -70,7 +71,7 @@ function setLayer(id, ok, value, sub) {
 function renderMachineLayers() {
   const m = currentMachine();
   if (!m) {
-    for (const id of ['layer-cpu', 'layer-mem', 'layer-disk', 'layer-swap']) setLayer(id, null, '—', '');
+    for (const id of ['layer-wifi', 'layer-cpu', 'layer-mem', 'layer-disk', 'layer-swap']) setLayer(id, null, '—', '');
     $('machine-note').textContent = '';
     return;
   }
@@ -78,7 +79,9 @@ function renderMachineLayers() {
   // four samples when MACHINE_MS is longer) and lists what's over its limit in w.
   const ok = (key, value) => (value == null ? null : m.w?.includes(key) ? 'w' : true);
   setLayer('layer-cpu', ok('cpu', m.cpu), m.cpu == null ? '—' : `${Math.round(m.cpu)}%`, `load ${m.load.toFixed(2)}`);
-  setLayer('layer-mem', ok('mem', m.mem), m.mem == null ? '—' : `${Math.round(m.mem)}% used`, '');
+  setLayer('layer-mem', ok('mem', m.mem), m.mem == null ? '—' : `${Math.round(m.mem)}% used`,
+    m.mp === undefined ? '' : `pressure ${{ 1: 'normal', 2: 'warning', 4: 'critical' }[m.mp] ?? m.mp}`);
+  renderWifi(m);
   setLayer('layer-disk', ok('disk', m.dgb), m.dgb == null ? '—' : `${fmtBytes(m.dgb * 1e9)} free`,
     m.disk == null ? '' : `${Math.round(m.disk)}% of ${config.diskPath}`);
   setLayer('layer-swap', ok('swap', m.swap), m.swap == null ? '—' : `${fmtBytes(m.swap * 1048576)} used`,
@@ -88,6 +91,19 @@ function renderMachineLayers() {
   if (m.bat !== undefined) notes.push(`Battery ${m.bat}%${m.ac ? ', on power' : ''}`);
   if (m.hot) notes.push('CPU slowed down for heat');
   $('machine-note').textContent = notes.join(' · ');
+}
+
+// Wi-Fi readings come with the machine samples, and only while the router is reached over Wi-Fi.
+function renderWifi(m) {
+  if (m.rssi === undefined) {
+    setLayer('layer-wifi', null, iface ? 'Not in use' : '—', iface ? `connected through ${iface}` : '');
+    return;
+  }
+  const words = m.rssi >= -60 ? 'strong' : m.rssi >= -67 ? 'good' : m.rssi >= -75 ? 'fair' : 'weak';
+  const details = [words];
+  if (m.rate) details.push(`${m.rate} Mbps`);
+  if (m.ch) details.push(`ch ${m.ch}`);
+  setLayer('layer-wifi', m.w?.includes('wifi') ? 'w' : true, `${m.rssi} dBm`, details.join(' · '));
 }
 
 function renderHero() {
@@ -616,6 +632,7 @@ function connect() {
     const data = JSON.parse(e.data);
     config = { ...config, ...data.config };
     gateway = data.gateway;
+    iface = data.iface ?? null;
     samples = data.samples;
     machine = data.machine?.samples ?? [];
     procs = data.machine?.procs ?? null;
@@ -626,6 +643,7 @@ function connect() {
   es.addEventListener('sample', (e) => {
     const data = JSON.parse(e.data);
     gateway = data.gateway;
+    iface = data.iface ?? null;
     samples.push(data.sample);
     const cutoff = Date.now() - 86400000;
     if (samples.length && samples[0].t < cutoff) samples = samples.filter((x) => x.t >= cutoff);

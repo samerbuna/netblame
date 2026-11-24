@@ -105,7 +105,7 @@ export function createMonitor(cfg: Config) {
     samples.push(sample);
     samples = dropOlderThan(samples, now - HISTORY_MS);
 
-    emit('sample', { sample, gateway });
+    emit('sample', { sample, gateway, iface: gatewayIface });
     await persist(cfg.dataDir, sample);
   }
 
@@ -185,7 +185,7 @@ export function createMonitor(cfg: Config) {
         tickMs: cfg.tickMs, gapMs: cfg.gapMs, pingHost: cfg.pingHost, httpUrl: cfg.httpUrl, httpEveryMs: cfg.httpEveryMs,
         machineMs: cfg.machineMs, machineGapMs: cfg.machineGapMs, diskPath: cfg.diskPath,
       };
-      return { config, gateway, samples, machine: { samples: machineSamples, procs } };
+      return { config, gateway, iface: gatewayIface, samples, machine: { samples: machineSamples, procs } };
     },
     subscribe(fn: Listener): () => void {
       listeners.add(fn);
