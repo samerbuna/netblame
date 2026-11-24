@@ -328,7 +328,9 @@ export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 
   const x = recent[recent.length - 1];
   if (!x) return { s: 'up' };
   const covered = x.t - recent[0].t >= windowMs * 0.75;
-  const over = windowMs <= 60_000 ? 'the last minute' : `the last ${Math.round(windowMs / 60_000)} minutes`;
+  const over = windowMs <= 60_000 ? 'the last minute'
+    : windowMs < 120_000 ? `the last ${Math.round(windowMs / 1000)} seconds`
+    : `the last ${Math.round(windowMs / 60_000)} minutes`;
   const avg = (key: 'cpu' | 'mem' | 'so') => {
     const vals = recent.map((y) => y[key]).filter((v): v is number => v !== null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
