@@ -7,7 +7,7 @@ import { persist, loadRange, loadRangeAsync, pruneOldFiles, dropOlderThan, daySt
 import { defaultDataDir, loadConfig } from '../src/config.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'is-it-me-test-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'netblame-test-'));
 
 test('persist and loadRange: by kind and time range, skipping a torn last line', async () => {
   const dir = tmp();
@@ -41,10 +41,10 @@ test('dropOlderThan keeps the list when nothing is older', () => {
 });
 
 test('defaultDataDir: per platform, honouring an absolute XDG_STATE_HOME', () => {
-  assert.equal(defaultDataDir('darwin', {}, '/Users/a'), '/Users/a/Library/Application Support/is-it-me');
-  assert.equal(defaultDataDir('linux', {}, '/home/a'), '/home/a/.local/state/is-it-me');
-  assert.equal(defaultDataDir('linux', { XDG_STATE_HOME: '/x/state' }, '/home/a'), '/x/state/is-it-me');
-  assert.equal(defaultDataDir('linux', { XDG_STATE_HOME: 'relative' }, '/home/a'), '/home/a/.local/state/is-it-me');
+  assert.equal(defaultDataDir('darwin', {}, '/Users/a'), '/Users/a/Library/Application Support/netblame');
+  assert.equal(defaultDataDir('linux', {}, '/home/a'), '/home/a/.local/state/netblame');
+  assert.equal(defaultDataDir('linux', { XDG_STATE_HOME: '/x/state' }, '/home/a'), '/x/state/netblame');
+  assert.equal(defaultDataDir('linux', { XDG_STATE_HOME: 'relative' }, '/home/a'), '/home/a/.local/state/netblame');
 });
 
 test('loadConfig: defaults, overrides, and nonsense falls back', () => {

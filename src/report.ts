@@ -34,7 +34,7 @@ export function buildReport(all: Sample[], opts: ReportOptions): string {
   const running = last !== undefined && now - last.t <= opts.gapMs;
   const lines = [
     `Internet connection report, ${when(from)} to ${when(now)}`,
-    `Measured on this computer by is-it-me, which checks the router, the internet (ping ${opts.pingHost}), DNS and a web request every ${opts.tickMs / 1000} seconds.`,
+    `Measured on this computer by netblame, which checks the router, the internet (ping ${opts.pingHost}), DNS and a web request every ${opts.tickMs / 1000} seconds.`,
     '',
   ];
   if (!sliceFrom(samples, from).length) {

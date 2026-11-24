@@ -55,7 +55,7 @@ test('serves the page files from the allowlist only', async () => {
   const page = await get('/');
   assert.equal(page.status, 200);
   assert.match(page.type, /text\/html/);
-  assert.match(page.body, /<title>Is it me\?<\/title>/);
+  assert.match(page.body, /<title>netblame<\/title>/);
   assert.match((await get('/app.js')).type, /text\/javascript/);
   assert.match((await get('/style.css')).type, /text\/css/);
   assert.equal((await get('/lib/status.js')).status, 200);
@@ -66,7 +66,7 @@ test('serves the page files from the allowlist only', async () => {
 });
 
 test('health names the app and version', async () => {
-  assert.deepEqual(JSON.parse((await get('/health')).body), { app: 'is-it-me', version: VERSION });
+  assert.deepEqual(JSON.parse((await get('/health')).body), { app: 'netblame', version: VERSION });
 });
 
 test('events: init first, then what the monitor emits, and counts viewers', async () => {

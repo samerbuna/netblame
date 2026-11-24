@@ -125,8 +125,8 @@ function renderHero() {
     $('since').textContent = '';
   } else if (status === 'idle') {
     $('reason').textContent = connected
-      ? 'No checks are arriving. The monitor may have stopped (start it with: npx is-it-me), or the machine just woke from sleep.'
-      : 'Can’t reach the monitor on localhost. Start it with: npx is-it-me';
+      ? 'No checks are arriving. The monitor may have stopped (start it with: npx netblame), or the machine just woke from sleep.'
+      : 'Can’t reach the monitor on localhost. Start it with: npx netblame';
     $('since').textContent = last ? `Last check ${fmtTime(last.t)}` : '';
   } else {
     const reasons = [];
@@ -137,7 +137,7 @@ function renderHero() {
     $('since').textContent = from ? `for ${fmtDur(Date.now() - from)}, since ${fmtTime(from, false)}` : '';
   }
 
-  document.title = `${LABELS[status]} · Is it me?`;
+  document.title = `${LABELS[status]} · netblame`;
   setFavicon(status);
 
   if (!last || status === 'idle') {

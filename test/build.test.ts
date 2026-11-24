@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, '..');
 
 // Lays the package out the way npm installs it: dist/, public/ and package.json in one folder.
 function buildPackage(): string {
-  const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'is-it-me-build-'));
+  const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'netblame-build-'));
   execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/build.ts', path.join(pkg, 'dist')], { cwd: root });
   fs.cpSync(path.join(root, 'public'), path.join(pkg, 'public'), { recursive: true });
   fs.copyFileSync(path.join(root, 'package.json'), path.join(pkg, 'package.json'));
@@ -36,7 +36,7 @@ test('build: every source file becomes plain JS with .js imports', () => {
   const pkgJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(runBuilt(pkg, ['--version']).trim(), pkgJson.version);
   assert.match(runBuilt(pkg, ['--help']), /Usage:/);
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'is-it-me-empty-'));
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'netblame-empty-'));
   assert.match(runBuilt(pkg, ['report', '--days', '1'], { DATA_DIR: empty }), /No checks were recorded/);
 });
 

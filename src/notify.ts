@@ -115,9 +115,9 @@ export function sendNote(note: Note): void {
       '-e', 'on run argv',
       '-e', 'display notification (item 3 of argv) with title (item 1 of argv) subtitle (item 2 of argv)',
       '-e', 'end run',
-      'Is it me?', note.title, note.body,
+      'netblame', note.title, note.body,
     ], done);
   } else {
-    execFile('notify-send', ['--app-name=is-it-me', note.title, note.body], done);
+    execFile('notify-send', ['--app-name=netblame', note.title, note.body], done);
   }
 }

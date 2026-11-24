@@ -51,7 +51,7 @@ const quote = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').r
 export function systemdUnit(spec: ServiceSpec): string {
   const env = Object.entries(spec.env).map(([k, v]) => `Environment=${quote(`${k}=${v}`)}`).join('\n');
   return `[Unit]
-Description=is-it-me: is it me, or the internet?
+Description=netblame: is it me, or the internet?
 
 [Service]
 ExecStart=${[spec.node, spec.cli, 'run'].map(quote).join(' ')}
@@ -140,7 +140,7 @@ export async function install(cfg: Config, portFree: () => Promise<boolean>): Pr
         restored = ` The service that was already installed is stopped; run install again once the port is free.`;
       }
     }
-    throw new Error(`Port ${cfg.port} is in use, probably by is-it-me running in a terminal. Stop that (Ctrl-C) and run install again, or pick another port: PORT=${cfg.port + 1} ${APP} install.${restored}`);
+    throw new Error(`Port ${cfg.port} is in use, probably by netblame running in a terminal. Stop that (Ctrl-C) and run install again, or pick another port: PORT=${cfg.port + 1} ${APP} install.${restored}`);
   }
 
   fs.mkdirSync(cfg.dataDir, { recursive: true });

@@ -1,14 +1,14 @@
-# Is it me?
+# netblame
 
 A local page that tells you whether a bad connection is your Wi-Fi, your router, your ISP, DNS, or this machine. It checks every few seconds, keeps a week of history, notifies you when something goes wrong, and gives you an outage report to send your ISP.
 
-- `npx is-it-me` starts monitoring and opens the page.
-- `npx is-it-me install` keeps it running: it starts now and at every login.
-- `npx is-it-me report` prints an outage report for the last 7 days.
+- `npx netblame` starts monitoring and opens the page.
+- `npx netblame install` keeps it running: it starts now and at every login.
+- `npx netblame report` prints an outage report for the last 7 days.
 
 Needs Node 22 or newer, on macOS or Linux. It has no dependencies and needs no sudo. Nothing is sent anywhere except the checks themselves (see Privacy).
 
-The page is at http://localhost:4321. Running `npx is-it-me` again while it's already running just opens the page.
+The page is at http://localhost:4321. Running `npx netblame` again while it's already running just opens the page.
 
 ## What the status means
 
@@ -71,14 +71,14 @@ On macOS the notifications come from `osascript`, so the first one may ask for p
 ## Start at login
 
 ```zsh
-npx is-it-me install
+npx netblame install
 ```
 
-This sets it up as a launchd agent on macOS, or a systemd user service on Linux, starts it now, and restarts it if it crashes. It copies the app into its data folder first, because npx runs packages from a cache that can be cleared, and it runs that copy with the Node that ran `install`. Settings set at install time (`PORT=4322 npx is-it-me install`) are kept. Run `install` again to upgrade or change settings. `npx is-it-me uninstall` removes it and keeps the history.
+This sets it up as a launchd agent on macOS, or a systemd user service on Linux, starts it now, and restarts it if it crashes. It copies the app into its data folder first, because npx runs packages from a cache that can be cleared, and it runs that copy with the Node that ran `install`. Settings set at install time (`PORT=4322 npx netblame install`) are kept. Run `install` again to upgrade or change settings. `npx netblame uninstall` removes it and keeps the history.
 
 ## Outage report
 
-`npx is-it-me report` prints the last 7 days, or `report --days 3` for fewer:
+`npx netblame report` prints the last 7 days, or `report --days 3` for fewer:
 - the period;
 - how much of it was monitored;
 - uptime;
@@ -93,7 +93,7 @@ The Speed test card runs Apple's `networkQuality`. It shows download and upload 
 
 ## Data
 
-History lives in `~/Library/Application Support/is-it-me` on macOS and `~/.local/state/is-it-me` on Linux (or `$XDG_STATE_HOME/is-it-me`). There is one file per day for each kind:
+History lives in `~/Library/Application Support/netblame` on macOS and `~/.local/state/netblame` on Linux (or `$XDG_STATE_HOME/netblame`). There is one file per day for each kind:
 - `YYYY-MM-DD.jsonl`: network checks;
 - `YYYY-MM-DD.machine.jsonl`: machine health;
 - `YYYY-MM-DD.events.jsonl`: changes.
@@ -104,7 +104,7 @@ It only monitors while it's running. Gaps when it was stopped or the machine sle
 
 ## Settings
 
-Set these as environment variables, for example `PORT=4322 npx is-it-me`.
+Set these as environment variables, for example `PORT=4322 npx netblame`.
 
 | Variable | Default | |
 | --- | --- | --- |

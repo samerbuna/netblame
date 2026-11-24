@@ -1,14 +1,14 @@
 {
-  "name": "is-it-me",
+  "name": "netblame",
   "version": "0.1.0",
   "description": "Is it me, or the internet? A local page that says whether your Wi-Fi, router, ISP, DNS or this machine is the problem.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/samerbuna/is-it-me.git"
+    "url": "git+https://github.com/samerbuna/netblame.git"
   },
-  "homepage": "https://github.com/samerbuna/is-it-me#readme",
-  "bugs": "https://github.com/samerbuna/is-it-me/issues",
+  "homepage": "https://github.com/samerbuna/netblame#readme",
+  "bugs": "https://github.com/samerbuna/netblame/issues",
   "keywords": [
     "network",
     "monitor",
@@ -22,7 +22,7 @@
   ],
   "type": "module",
   "bin": {
-    "is-it-me": "dist/cli.js"
+    "netblame": "dist/cli.js"
   },
   "files": [
     "dist",

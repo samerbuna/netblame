@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { judgingWindow } from './machine.ts';
 
-export const APP = 'is-it-me';
+export const APP = 'netblame';
 
 // The package root: this file sits one level down, in src/ when run from source and in dist/ when built.
 export const ROOT = path.resolve(import.meta.dirname, '..');

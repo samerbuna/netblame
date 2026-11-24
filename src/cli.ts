@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// is-it-me: says whether your connection, Wi-Fi, ISP, DNS or this machine is the problem.
+// netblame: says whether your connection, Wi-Fi, ISP, DNS or this machine is the problem.
 
 import { execFile } from 'node:child_process';
 import net from 'node:net';
@@ -33,7 +33,7 @@ function openPage(cfg: Config): void {
   execFile(opener, [url(cfg)], () => { /* no browser to open; the URL is printed anyway */ });
 }
 
-// True when an is-it-me server already answers on the port.
+// True when a netblame server already answers on the port.
 async function alreadyRunning(cfg: Config): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${cfg.port}/health`, { signal: AbortSignal.timeout(1000) });
