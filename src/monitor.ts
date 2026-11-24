@@ -59,7 +59,8 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
   };
   let viewers = 0;
   let notifier: ReturnType<typeof createNotifier> | null = null;
-  const timers: NodeJS.Timeout[] = [];
+  // The pending timer of each loop, by name, so stop() can clear them.
+  const timers = new Map<string, NodeJS.Timeout>();
   let stopped = false;
 
   // ---------- network ----------
@@ -220,7 +221,7 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
         console.error(`${label} failed:`, err);
       }
       after?.();
-      if (!stopped) timers.push(setTimeout(loop, Math.max(0, intervalMs - (Date.now() - started))));
+      if (!stopped) timers.set(label, setTimeout(loop, Math.max(0, intervalMs - (Date.now() - started))));
     };
     loop();
   }
@@ -236,13 +237,13 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
       pruneOldFiles(cfg.dataDir, cfg.keepDays);
       const prune = setInterval(() => pruneOldFiles(cfg.dataDir, cfg.keepDays), 60 * 60 * 1000);
       prune.unref();
-      timers.push(prune);
+      timers.set('prune', prune);
       every(cfg.tickMs, 'check round', tick, () => { lastTickEnd = Date.now(); });
       every(cfg.machineMs, 'machine check', machineTick);
     },
     stop(): void {
       stopped = true;
-      for (const t of timers) clearTimeout(t);
+      for (const t of timers.values()) clearTimeout(t);
     },
     // What a page gets when it connects: the settings it needs and the last 24 hours.
     init(): Snapshot {
