@@ -1,12 +1,14 @@
-// History on disk: one JSON line per sample, one file per local day and kind.
-// Network samples go to YYYY-MM-DD.jsonl, machine samples to YYYY-MM-DD.machine.jsonl.
+// History on disk: one JSON line per record, one file per local day and kind.
+// Network samples go to YYYY-MM-DD.jsonl, machine samples to YYYY-MM-DD.machine.jsonl,
+// and events (network changes, wake from sleep, speed tests) to YYYY-MM-DD.events.jsonl.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 export const MACHINE = '.machine';
+export const EVENTS = '.events';
 
-export const FILE_RE = /^(\d{4}-\d{2}-\d{2})(\.machine)?\.jsonl$/;
+export const FILE_RE = /^(\d{4}-\d{2}-\d{2})(\.machine|\.events)?\.jsonl$/;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

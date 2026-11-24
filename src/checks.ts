@@ -95,3 +95,19 @@ export async function findGateway(): Promise<Route | null> {
   return await findRoute('route', ['-n', 'get', 'default'], ROUTE_RE.macRoute)
     ?? findRoute('netstat', ['-rn', '-f', 'inet'], ROUTE_RE.macNetstat);
 }
+
+// The interface traffic to host leaves through. With a VPN that carries everything, that's its tunnel.
+export async function routeInterface(host: string): Promise<string | null> {
+  const out = process.platform === 'darwin'
+    ? await run('route', ['-n', 'get', host], 2000)
+    : await run('ip', ['route', 'get', host], 2000);
+  if (!out) return null;
+  const m = (process.platform === 'darwin' ? /interface:\s*(\S+)/ : /\bdev\s+(\S+)/).exec(out);
+  return m ? m[1] : null;
+}
+
+// Tunnel interfaces that VPNs (WireGuard, OpenVPN, IPsec, Tailscale, ZeroTier, macOS utun) use.
+export const isTunnel = (iface: string | null) => iface !== null && /^(utun|tun|tap|wg|ppp|ipsec|tailscale|zt)/.test(iface);
+
+// Router addresses phones use when sharing their connection: iPhone, and older Android.
+export const isPhoneHotspot = (gateway: string | null) => gateway === '172.20.10.1' || gateway === '192.168.43.1';

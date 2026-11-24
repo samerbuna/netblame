@@ -12,6 +12,9 @@ let iface = null; // the interface the router is reached on
 let samples = [];
 let machine = []; // machine health samples, same 24 hours
 let procs = null; // latest top processes, live only
+let events = []; // network changes, wake from sleep, speed tests: same 24 hours
+let vpn = null; // the VPN's tunnel interface, when one carries traffic
+let hotspot = false; // the router looks like a phone sharing its connection
 let connected = false;
 let triedOnce = false; // true after the first connect attempt succeeds or fails
 let rangeMs = 3600000;
@@ -146,7 +149,12 @@ function renderHero() {
     if (last.n !== null || last.h != null) setLayer('layer-router', null, 'Unknown', 'router address not found');
     else setLayer('layer-router', false, 'No route', 'not on a network');
   }
-  else setLayer('layer-router', last.g !== null, last.g !== null ? `${fmtMs(last.g)} ms` : 'No reply', gateway || '');
+  else {
+    const notes = [gateway || ''];
+    if (hotspot) notes.push('phone hotspot');
+    if (vpn) notes.push(`VPN ${vpn}`);
+    setLayer('layer-router', last.g !== null, last.g !== null ? `${fmtMs(last.g)} ms` : 'No reply', notes.join(' · '));
+  }
   // Amber while the server says the connection is lossy, jittery or slow under load.
   const minute = sliceFrom(samples, Date.now() - 60000).map((x) => x.n).filter((v) => v !== null);
   const j = jitter(minute);
@@ -280,7 +288,8 @@ function tipRow(color, value, name) {
 //   footer(b): optional [value, name] row under the series in the tooltip
 //   bands: false to leave out the status bands
 //   statusOf(x): the status a sample counts as for bands and the tooltip, x.s by default
-function makeChart({ svg, tip, list, stepMs, series, yMax: scale, yLabel, left = 40, footer, bands = true, statusOf = (x) => x.s }) {
+//   marks(): optional events ({ t, text }) drawn as dashed lines and listed in the tooltip
+function makeChart({ svg, tip, list, stepMs, series, yMax: scale, yLabel, left = 40, footer, bands = true, statusOf = (x) => x.s, marks }) {
   let buckets = [];
   let geom = null;
   let hoverIndex = null;
@@ -309,6 +318,9 @@ function makeChart({ svg, tip, list, stepMs, series, yMax: scale, yLabel, left =
       }
       const st = statusOf(x);
       if (b.worst === null || STATUS_RANK[st] > STATUS_RANK[b.worst]) b.worst = st;
+    }
+    for (const e of marks ? sliceFrom(marks(), start) : []) {
+      (buckets[Math.min(n - 1, Math.floor((e.t - start) / bms))].marks ??= []).push(e);
     }
     let max = 0;
     for (const b of buckets) {
@@ -340,6 +352,13 @@ function makeChart({ svg, tip, list, stepMs, series, yMax: scale, yLabel, left =
       }, svg);
       i = j + 1;
     }
+
+    // event marks, behind the grid and lines
+    buckets.forEach((b, k) => {
+      if (!b.marks) return;
+      const xx = m.l + (k + 0.5) * bandW;
+      svgEl('line', { x1: xx, x2: xx, y1: m.t, y2: m.t + ph, stroke: 'var(--ink-2)', 'stroke-width': 1, 'stroke-dasharray': '2 3' }, svg);
+    });
 
     // y grid + labels
     // 4 or 5 gridline steps, whichever lands on whole numbers (50 -> 10s, 100 -> 25s).
@@ -415,6 +434,11 @@ function makeChart({ svg, tip, list, stepMs, series, yMax: scale, yLabel, left =
         tip.appendChild(st);
       }
     }
+    for (const e of b.marks ?? []) {
+      const row = tipRow(null, fmtTime(e.t, false), e.text);
+      row.classList.add('tt-mark');
+      tip.appendChild(row);
+    }
     tip.style.display = 'block';
     const wrapW = svg.clientWidth;
     const tw = tip.offsetWidth;
@@ -455,6 +479,7 @@ const rttChart = makeChart({
   yMax: (max) => niceMax(Math.max(max * 1.1, 20)),
   yLabel: (v) => String(Math.round(v)),
   footer: (b) => [LABELS[b.worst], b.miss.n ? `${b.miss.n} of ${b.cnt} pings lost` : `${b.cnt} check${b.cnt === 1 ? '' : 's'}`],
+  marks: () => events,
 });
 
 // Shade this chart only for warnings about what it plots: a full disk or low battery
@@ -542,6 +567,22 @@ function renderOutages() {
   })));
 }
 
+function renderChanges() {
+  const box = $('changes');
+  const list = events.slice(-50).reverse();
+  if (!list.length) {
+    const p = document.createElement('div');
+    p.className = 'empty';
+    p.textContent = 'No changes recorded.';
+    box.replaceChildren(p);
+    return;
+  }
+  box.replaceChildren(table(['Time', 'What happened'], list.map((e) => (tr) => {
+    cell(tr, `${new Date(e.t).toLocaleDateString([], { weekday: 'short' })} ${fmtTime(e.t)}`);
+    cell(tr, e.text);
+  })));
+}
+
 function renderRecent() {
   const details = $('recent').closest('details');
   if (!details.open) return;
@@ -614,6 +655,7 @@ function renderNetwork() {
   renderTiles();
   rttChart.render();
   renderOutages();
+  renderChanges();
   renderRecent();
   $('legend-internet').textContent = `Internet (${config.pingHost})`;
   $('legend-router').textContent = gateway ? `Router (${gateway})` : 'Router';
@@ -634,14 +676,22 @@ function setRange(ms) {
 }
 for (const b of document.querySelectorAll('.filters button')) b.addEventListener('click', () => setRange(Number(b.dataset.range)));
 
+// The route details that come with init and every sample.
+function setLink(data) {
+  gateway = data.gateway;
+  iface = data.iface ?? null;
+  vpn = data.vpn ?? null;
+  hotspot = !!data.hotspot;
+}
+
 function connect() {
   const es = new EventSource('/events');
   es.addEventListener('init', (e) => {
     const data = JSON.parse(e.data);
     config = { ...config, ...data.config };
-    gateway = data.gateway;
-    iface = data.iface ?? null;
+    setLink(data);
     samples = data.samples;
+    events = data.events ?? [];
     machine = data.machine?.samples ?? [];
     procs = data.machine?.procs ?? null;
     connected = true;
@@ -650,8 +700,7 @@ function connect() {
   });
   es.addEventListener('sample', (e) => {
     const data = JSON.parse(e.data);
-    gateway = data.gateway;
-    iface = data.iface ?? null;
+    setLink(data);
     samples.push(data.sample);
     const cutoff = Date.now() - 86400000;
     if (samples.length && samples[0].t < cutoff) samples = samples.filter((x) => x.t >= cutoff);
@@ -668,6 +717,13 @@ function connect() {
     if (machine.length && machine[0].t < cutoff) machine = machine.filter((x) => x.t >= cutoff);
     renderHero();
     renderMachine();
+  });
+  es.addEventListener('event', (e) => {
+    events.push(JSON.parse(e.data));
+    const cutoff = Date.now() - 86400000;
+    if (events[0].t < cutoff) events = events.filter((x) => x.t >= cutoff);
+    renderChanges();
+    rttChart.render();
   });
   es.addEventListener('error', () => {
     // EventSource retries on its own; just show that we're cut off meanwhile.

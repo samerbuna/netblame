@@ -25,7 +25,7 @@ test('persist and loadRange: by kind and time range, skipping a torn last line',
 test('pruneOldFiles: removes only this app\'s files older than keepDays', () => {
   const dir = tmp();
   const now = new Date(2026, 10, 24, 12).getTime();
-  for (const f of ['2026-11-10.jsonl', '2026-11-10.machine.jsonl', '2026-11-20.jsonl', 'notes.txt', '2026-11-01.backup']) {
+  for (const f of ['2026-11-10.jsonl', '2026-11-10.machine.jsonl', '2026-11-10.events.jsonl', '2026-11-20.jsonl', 'notes.txt', '2026-11-01.backup']) {
     fs.writeFileSync(path.join(dir, f), '');
   }
   pruneOldFiles(dir, 7, now);

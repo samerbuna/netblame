@@ -3,14 +3,15 @@
 
 import fs from 'node:fs';
 import type { Config } from './config.ts';
-import { ping, dnsCheck, httpCheck, findGateway } from './checks.ts';
+import { ping, dnsCheck, httpCheck, findGateway, routeInterface, isTunnel, isPhoneHotspot } from './checks.ts';
 import type { HttpResult } from './checks.ts';
 import { judgeNetwork, linkQuality, QUALITY } from './netrules.ts';
 import { sliceFrom } from '../public/lib/status.js';
+import { fmtDur } from '../public/lib/format.js';
 import type { Sample } from './netrules.ts';
 import { createCollector, machineStatus } from './machine.ts';
 import type { MachineSample, Procs } from './machine.ts';
-import { persist, loadRange, dropOlderThan, pruneOldFiles, MACHINE } from './history.ts';
+import { persist, loadRange, dropOlderThan, pruneOldFiles, MACHINE, EVENTS } from './history.ts';
 
 const GATEWAY_REFRESH_MS = 30_000;
 const HISTORY_MS = 24 * 60 * 60 * 1000; // what the page gets on connect
@@ -18,6 +19,19 @@ const SLEEP_SLACK_MS = 5000;            // the wait between rounds overran by th
 const RESUME_GRACE_MS = 20_000;         // Wi-Fi takes a few seconds to rejoin after sleep; don't call that an outage
 
 export type Listener = (event: string, data: unknown) => void;
+
+// Something that happened, for the timeline: the monitor starting, the machine waking,
+// the network or VPN changing, a speed test.
+export interface MonitorEvent { t: number; k: 'start' | 'wake' | 'net' | 'vpn' | 'speed'; text: string }
+
+// "en1, router 172.20.10.1 (phone hotspot, uses mobile data), VPN on (utun3)"
+export function describeNetwork(gateway: string | null, iface: string | null, vpn: string | null): string {
+  if (!gateway) return 'no network';
+  let s = `${iface ?? 'unknown interface'}, router ${gateway}`;
+  if (isPhoneHotspot(gateway)) s += ' (phone hotspot, uses mobile data)';
+  if (vpn) s += `, VPN on (${vpn})`;
+  return s;
+}
 
 export interface Snapshot {
   [key: string]: unknown;
@@ -41,6 +55,9 @@ export function createMonitor(cfg: Config) {
   let samples: Sample[] = [];
   let gateway: string | null = null;
   let gatewayIface: string | null = null; // where throughput is measured
+  let vpn: string | null = null;          // the tunnel traffic to the ping host leaves through, when a VPN carries it
+  let routeKnown = false;                 // false until the first route lookup, which the start event describes
+  let events: MonitorEvent[] = [];
   let gatewayCheckedAt = 0;
   let lastHttp: HttpResult | null = null;
   let lastHttpAt = 0;
@@ -56,13 +73,13 @@ export function createMonitor(cfg: Config) {
       graceUntil = now + RESUME_GRACE_MS;
       failStreak = 0;
       gatewayCheckedAt = 0; // likely a different network after waking
+      addEvent(now, 'wake', `Woke from sleep (about ${fmtDur(now - lastTickEnd)} asleep)`);
     }
 
     const lastSample = samples.at(-1);
     if (!gateway || now - gatewayCheckedAt > GATEWAY_REFRESH_MS || lastSample?.g === null) {
-      const route = await findGateway();
-      gateway = route?.gateway ?? null;
-      gatewayIface = route?.iface ?? null;
+      const [route, tunnel] = await Promise.all([findGateway(), routeInterface(cfg.pingHost)]);
+      noteRoute(now, route?.gateway ?? null, route?.iface ?? null, isTunnel(tunnel) ? tunnel : null);
       gatewayCheckedAt = now;
     }
 
@@ -105,9 +122,34 @@ export function createMonitor(cfg: Config) {
     samples.push(sample);
     samples = dropOlderThan(samples, now - HISTORY_MS);
 
-    emit('sample', { sample, gateway, iface: gatewayIface });
+    emit('sample', { sample, ...link() });
     await persist(cfg.dataDir, sample);
   }
+
+  // Records a change of router, interface or VPN as an event, then remembers the new route.
+  function noteRoute(now: number, nextGateway: string | null, nextIface: string | null, nextVpn: string | null): void {
+    const desc = describeNetwork(nextGateway, nextIface, nextVpn);
+    if (!routeKnown) addEvent(now, 'start', `Monitor started: ${desc}`);
+    else if (nextGateway !== gateway || nextIface !== gatewayIface) {
+      addEvent(now, 'net', !nextGateway ? 'Network lost: no router' : gateway ? `Network changed: ${desc}` : `Joined a network: ${desc}`);
+    } else if (nextVpn !== vpn) addEvent(now, 'vpn', nextVpn ? `VPN on (${nextVpn})` : 'VPN off');
+    routeKnown = true;
+    gateway = nextGateway;
+    gatewayIface = nextIface;
+    vpn = nextVpn;
+  }
+
+  function addEvent(t: number, k: MonitorEvent['k'], text: string): void {
+    const ev: MonitorEvent = { t, k, text };
+    events.push(ev);
+    events = dropOlderThan(events, t - HISTORY_MS);
+    console.log(`${new Date(t).toLocaleTimeString()}  ${text}`);
+    emit('event', ev);
+    void persist(cfg.dataDir, ev, EVENTS);
+  }
+
+  // What the page shows about the current route.
+  const link = () => ({ gateway, iface: gatewayIface, vpn, hotspot: isPhoneHotspot(gateway) });
 
   function logChange(x: Sample): void {
     const label = { up: 'ONLINE ', warn: 'DEGRADED', down: 'OFFLINE' }[x.s];
@@ -167,6 +209,7 @@ export function createMonitor(cfg: Config) {
       fs.mkdirSync(cfg.dataDir, { recursive: true });
       const now = Date.now();
       samples = loadRange<Sample>(cfg.dataDir, now - HISTORY_MS, now);
+      events = loadRange<MonitorEvent>(cfg.dataDir, now - HISTORY_MS, now, EVENTS);
       machineSamples = loadRange<MachineSample>(cfg.dataDir, now - HISTORY_MS, now, MACHINE);
       pruneOldFiles(cfg.dataDir, cfg.keepDays);
       const prune = setInterval(() => pruneOldFiles(cfg.dataDir, cfg.keepDays), 60 * 60 * 1000);
@@ -185,7 +228,7 @@ export function createMonitor(cfg: Config) {
         tickMs: cfg.tickMs, gapMs: cfg.gapMs, pingHost: cfg.pingHost, httpUrl: cfg.httpUrl, httpEveryMs: cfg.httpEveryMs,
         machineMs: cfg.machineMs, machineGapMs: cfg.machineGapMs, diskPath: cfg.diskPath,
       };
-      return { config, gateway, iface: gatewayIface, samples, machine: { samples: machineSamples, procs } };
+      return { config, ...link(), samples, events, machine: { samples: machineSamples, procs } };
     },
     subscribe(fn: Listener): () => void {
       listeners.add(fn);
