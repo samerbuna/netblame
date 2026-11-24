@@ -381,7 +381,8 @@
     }
     if (last.g === undefined) {
       // No router address found. While the internet still answers, that's a lookup gap, not "offline".
-      if (last.s === 'up' || last.n !== null) setLayer('layer-router', null, 'Unknown', 'router address not found');
+      // Same test as the server's: a ping reply or a passing web check (h is null when it failed).
+      if (last.n !== null || last.h != null) setLayer('layer-router', null, 'Unknown', 'router address not found');
       else setLayer('layer-router', false, 'No route', 'not on a network');
     }
     else setLayer('layer-router', last.g !== null, last.g !== null ? `${fmtMs(last.g)} ms` : 'No reply', gateway || '');
