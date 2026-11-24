@@ -624,11 +624,13 @@ function renderSpeed() {
   $('speed').replaceChildren(grid, note);
 }
 
+// Whether a test is running comes only from the server's 'speed' events: a test that fails at once
+// can report it's finished before this request's response arrives.
 async function runSpeedTest() {
   if (hotspot && !confirm('You’re on a phone hotspot. A speed test uses several hundred MB of its mobile data. Run it?')) return;
+  $('speed-run').disabled = true;
   try {
-    const res = await fetch('/speedtest', { method: 'POST' });
-    if (res.status === 202 || res.status === 409) speedRunning = true;
+    await fetch('/speedtest', { method: 'POST' });
   } catch { /* the monitor is unreachable; the hero already says so */ }
   renderSpeed();
 }
