@@ -723,11 +723,14 @@ function renderProcs() {
   );
   // macOS only: traffic in + out, with the split in the hover title.
   if (procs.net) {
-    const t = procs.net.length
-      ? procTable('By network', procs.net, (p) => fmtBytes(p.rx + p.tx, true))
-      : table(['By network', ''], [(tr) => { cell(tr, 'Nothing sending or receiving'); cell(tr, ''); }]);
-    procs.net.forEach((p, i) => { t.tBodies[0].rows[i].lastChild.title = `${fmtBytes(p.rx, true)} in, ${fmtBytes(p.tx, true)} out`; });
-    wrap.append(t);
+    const only = (text) => table(['By network', ''], [(tr) => { cell(tr, text); cell(tr, ''); }]);
+    if (procs.net === 'measuring') wrap.append(only('Measuring…'));
+    else if (!procs.net.length) wrap.append(only('Nothing sending or receiving'));
+    else {
+      const t = procTable('By network', procs.net, (p) => fmtBytes(p.rx + p.tx, true));
+      procs.net.forEach((p, i) => { t.tBodies[0].rows[i].lastChild.title = `${fmtBytes(p.rx, true)} in, ${fmtBytes(p.tx, true)} out`; });
+      wrap.append(t);
+    }
   }
   box.replaceChildren(wrap);
 }

@@ -56,8 +56,9 @@ export type Reading = Omit<MachineSample, 't' | 's' | 'r' | 'w'>;
 
 export interface Proc { pid: number; name: string; cpu: number | null; mb: number }
 export interface NetProc { pid: number; name: string; rx: number; tx: number } // bytes/s
-// net is only on macOS: Linux needs root to see traffic per process.
-export interface Procs { cpu: Proc[]; mem: Proc[]; net?: NetProc[] }
+// net is only on macOS: Linux needs root to see traffic per process. It's 'measuring' on the
+// first reading after a pause, which has nothing to compare against yet.
+export interface Procs { cpu: Proc[]; mem: Proc[]; net?: NetProc[] | 'measuring' }
 
 const isMac = process.platform === 'darwin';
 const round = (x: number, places = 1) => Math.round(x * 10 ** places) / 10 ** places;
@@ -317,7 +318,7 @@ export function createCollector(diskPath: string, intervalMs: number) {
   // Top processes by CPU and by memory.
   // macOS nettop reports bytes in and out per process since it started; the rate is the
   // difference between two calls, as with Linux CPU ticks.
-  async function macNetProcs(now: number): Promise<NetProc[] | null> {
+  async function macNetProcs(now: number): Promise<NetProc[] | 'measuring' | null> {
     const out = await run('nettop', ['-P', '-L', '1', '-J', 'bytes_in,bytes_out', '-x']);
     const bytes = out ? parseNettop(out) : null;
     const dt = (now - prevNetAt) / 1000;
@@ -332,7 +333,8 @@ export function createCollector(diskPath: string, intervalMs: number) {
     }
     prevNetBytes = bytes ? new Map([...bytes].map(([pid, b]) => [pid, { rx: b.rx, tx: b.tx }])) : new Map();
     prevNetAt = now;
-    return bytes ? list : null;
+    if (!bytes) return null;
+    return haveRates ? list : 'measuring';
   }
 
   // Top processes by CPU, memory and (on macOS) network.
@@ -345,7 +347,7 @@ export function createCollector(diskPath: string, intervalMs: number) {
     const byCpu = list.filter((p) => p.cpu !== null).sort((a, b) => b.cpu! - a.cpu!).slice(0, 5);
     const byMem = [...list].sort((a, b) => b.mb - a.mb).slice(0, 5);
     const top: Procs = { cpu: byCpu, mem: byMem };
-    if (net) top.net = net.sort((a, b) => b.rx + b.tx - (a.rx + a.tx)).slice(0, 5);
+    if (net) top.net = net === 'measuring' ? net : net.sort((a, b) => b.rx + b.tx - (a.rx + a.tx)).slice(0, 5);
     return top;
   }
 
