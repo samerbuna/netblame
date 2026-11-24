@@ -979,9 +979,15 @@
     box.replaceChildren(wrap);
   }
 
-  function renderMachine() {
+  let machineChartsAt = 0;
+  function renderMachineCharts() {
     loadChart.render();
     netChart.render();
+    machineChartsAt = Date.now();
+  }
+
+  function renderMachine() {
+    renderMachineCharts();
     renderProcs();
   }
 
@@ -1032,6 +1038,9 @@
       const cutoff = Date.now() - 86400000;
       if (samples.length && samples[0].t < cutoff) samples = samples.filter((x) => x.t >= cutoff);
       renderNetwork();
+      // Keep the machine charts' time axis moving with the network chart's when machine samples
+      // are far apart (a long MACHINE_MS) or have stopped, without redrawing them every 3s.
+      if (Date.now() - machineChartsAt >= 10000) renderMachineCharts();
     });
     es.addEventListener('machine', (e) => {
       const data = JSON.parse(e.data);
