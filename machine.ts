@@ -9,8 +9,9 @@ import { execFile } from 'node:child_process';
 
 // Thresholds for calling the machine degraded.
 export const LIMITS = {
-  diskPct: 10,       // free space below this % ...
-  diskGb: 5,         // ... or below this many GB
+  diskGb: 5,         // free space below this many GB, on any disk ...
+  diskPct: 10,       // ... or below this % while also below diskPctGb, so a big disk
+  diskPctGb: 50,     //     with hundreds of GB free doesn't count as full
   memPct: 90,        // memory in use, averaged over the window
   swapOutKBs: 1024,  // swap-out rate, averaged over the window
   cpuPct: 90,        // CPU busy, averaged over the window
@@ -289,7 +290,7 @@ export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 
     keys.push(key);
     reasons.push(text);
   };
-  if (x.dgb !== null && x.disk !== null && (x.disk < LIMITS.diskPct || x.dgb < LIMITS.diskGb)) {
+  if (x.dgb !== null && x.disk !== null && (x.dgb < LIMITS.diskGb || (x.disk < LIMITS.diskPct && x.dgb < LIMITS.diskPctGb))) {
     warn('disk', `Disk almost full (${x.dgb < 10 ? x.dgb.toFixed(1) : Math.round(x.dgb)} GB free)`);
   }
   if (covered) {
