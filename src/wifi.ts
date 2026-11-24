@@ -45,10 +45,24 @@ export function parseProcWireless(text: string, iface: string): Wifi | null {
   return null;
 }
 
+// networksetup -listallhardwareports: "Hardware Port: Wi-Fi" (or "AirPort" on old macOS), then "Device: en1".
+export function parseHardwarePorts(text: string): Set<string> {
+  const devices = new Set<string>();
+  for (const m of text.matchAll(/^Hardware Port: (?:Wi-Fi|AirPort)\s*\nDevice: (\S+)/gm)) devices.add(m[1]);
+  return devices;
+}
+
+// macOS Wi-Fi interface names, read once a process; null when networksetup isn't usable.
+let macWifiDevices: Promise<Set<string> | null> | null = null;
+const wifiDevices = () => (macWifiDevices ??= run('networksetup', ['-listallhardwareports']).then((out) => (out ? parseHardwarePorts(out) : null)));
+
 // The Wi-Fi link, only when iface (the one the router is reached on) is the Wi-Fi interface.
 export async function readWifi(iface: string | null): Promise<Wifi | null> {
   if (!iface) return null;
   if (process.platform === 'darwin') {
+    // Starting osascript costs a process every sample, so skip it when the route isn't over Wi-Fi.
+    const devices = await wifiDevices();
+    if (devices && !devices.has(iface)) return null;
     const out = await run('osascript', ['-l', 'JavaScript', '-e', JXA]);
     const w = out ? parseMacWifi(out) : null;
     return w && w.iface === iface ? w : null;
