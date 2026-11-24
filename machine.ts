@@ -17,7 +17,11 @@ export const LIMITS = {
   cpuPct: 90,        // CPU busy, averaged over the window
   batteryPct: 10,    // battery below this % and not on power
 };
-export const WINDOW_MS = 60_000;     // CPU, memory and swap are judged over this much history
+export const WINDOW_MS = 60_000;     // CPU, memory and swap are judged over this much history ...
+
+// ... or over four samples when samples are further apart than that, so a long MACHINE_MS
+// can still fill the window and doesn't quietly switch those warnings off.
+export const judgingWindow = (intervalMs: number) => Math.max(WINDOW_MS, intervalMs * 4);
 const SLOW_EVERY_MS = 60_000;        // battery and thermal change slowly; read them this often
 
 export interface MachineSample {
@@ -272,13 +276,14 @@ export function createCollector(diskPath: string, intervalMs: number) {
 
 // ---------- status ----------
 
-// recent: the machine samples from the last WINDOW_MS, oldest first, ending with the one being judged.
+// recent: the machine samples from the last windowMs (see judgingWindow), oldest first, ending with the one being judged.
 // CPU, memory and swap are averaged so a short spike doesn't count, and they're only judged once
 // the window is mostly covered (not right after start or wake).
-export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 'so' | 'disk' | 'dgb' | 'bat' | 'ac' | 'hot'>[]): { s: 'up' | 'warn'; r?: string; w?: WarnKey[] } {
+export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 'so' | 'disk' | 'dgb' | 'bat' | 'ac' | 'hot'>[], windowMs = WINDOW_MS): { s: 'up' | 'warn'; r?: string; w?: WarnKey[] } {
   const x = recent[recent.length - 1];
   if (!x) return { s: 'up' };
-  const covered = x.t - recent[0].t >= WINDOW_MS * 0.75;
+  const covered = x.t - recent[0].t >= windowMs * 0.75;
+  const over = windowMs <= 60_000 ? 'the last minute' : `the last ${Math.round(windowMs / 60_000)} minutes`;
   const avg = (key: 'cpu' | 'mem' | 'so') => {
     const vals = recent.map((y) => y[key]).filter((v): v is number => v !== null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
@@ -299,7 +304,7 @@ export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 
     const cpu = avg('cpu');
     if (mem !== null && mem > LIMITS.memPct) warn('mem', `Memory almost full (${Math.round(mem)}% in use)`);
     if (so !== null && so > LIMITS.swapOutKBs) warn('swap', `Swapping heavily (${(so / 1024).toFixed(1)} MB/s to disk)`);
-    if (cpu !== null && cpu > LIMITS.cpuPct) warn('cpu', `CPU busy (${Math.round(cpu)}% over the last minute)`);
+    if (cpu !== null && cpu > LIMITS.cpuPct) warn('cpu', `CPU busy (${Math.round(cpu)}% over ${over})`);
   }
   if (x.bat !== undefined && x.ac === 0 && x.bat < LIMITS.batteryPct) warn('bat', `Battery low (${x.bat}%)`);
   if (x.hot) warn('hot', 'CPU slowed down for heat');

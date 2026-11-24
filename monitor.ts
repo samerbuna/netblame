@@ -11,7 +11,7 @@ import { Resolver } from 'node:dns/promises';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createCollector, machineStatus, C_ENV, WINDOW_MS } from './machine.ts';
+import { createCollector, machineStatus, judgingWindow, C_ENV } from './machine.ts';
 import type { MachineSample, Procs } from './machine.ts';
 
 function envNum(name: string, fallback: number): number {
@@ -39,6 +39,7 @@ const SLEEP_SLACK_MS = 5000;            // the wait between rounds overran by th
 const RESUME_GRACE_MS = 20_000;         // Wi-Fi takes a few seconds to rejoin after sleep; don't call that an outage
 const DOWN_AFTER = 2;                   // consecutive failed ticks before we say "down"
 const MACHINE_GAP_MS = MACHINE_MS * 2 + 10_000;
+const MACHINE_WINDOW_MS = judgingWindow(MACHINE_MS);
 
 const HERE = import.meta.dirname;
 const DATA_DIR = path.join(HERE, 'data');
@@ -254,8 +255,8 @@ async function machineTick(): Promise<void> {
   ]);
   procs = top;
 
-  const recent = machineSamples.filter((y) => y.t > now - WINDOW_MS);
-  const status = machineStatus([...recent, { t: now, ...reading }]);
+  const recent = machineSamples.filter((y) => y.t > now - MACHINE_WINDOW_MS);
+  const status = machineStatus([...recent, { t: now, ...reading }], MACHINE_WINDOW_MS);
   const sample: MachineSample = { t: now, s: status.s, ...reading };
   if (status.r) sample.r = status.r;
   if (status.w) sample.w = status.w;
