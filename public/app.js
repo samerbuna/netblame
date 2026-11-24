@@ -578,12 +578,20 @@ function renderProcs() {
     return;
   }
   const wrap = document.createElement('div');
-  wrap.className = 'procs';
+  wrap.className = procs.net ? 'procs three' : 'procs';
   // CPU is % of one core, so a busy multi-threaded process can pass 100%.
   wrap.append(
     procTable('By CPU (% of one core)', procs.cpu, (p) => `${p.cpu < 10 ? p.cpu.toFixed(1) : Math.round(p.cpu)}%`),
     procTable('By memory', procs.mem, (p) => fmtBytes(p.mb * 1048576)),
   );
+  // macOS only: traffic in + out, with the split in the hover title.
+  if (procs.net) {
+    const t = procs.net.length
+      ? procTable('By network', procs.net, (p) => fmtBytes(p.rx + p.tx, true))
+      : table(['By network', ''], [(tr) => { cell(tr, 'Nothing sending or receiving'); cell(tr, ''); }]);
+    procs.net.forEach((p, i) => { t.tBodies[0].rows[i].lastChild.title = `${fmtBytes(p.rx, true)} in, ${fmtBytes(p.tx, true)} out`; });
+    wrap.append(t);
+  }
   box.replaceChildren(wrap);
 }
 

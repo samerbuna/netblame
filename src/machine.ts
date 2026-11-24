@@ -55,7 +55,9 @@ export type WarnKey = 'disk' | 'mem' | 'swap' | 'cpu' | 'bat' | 'hot' | 'wifi';
 export type Reading = Omit<MachineSample, 't' | 's' | 'r' | 'w'>;
 
 export interface Proc { pid: number; name: string; cpu: number | null; mb: number }
-export interface Procs { cpu: Proc[]; mem: Proc[] }
+export interface NetProc { pid: number; name: string; rx: number; tx: number } // bytes/s
+// net is only on macOS: Linux needs root to see traffic per process.
+export interface Procs { cpu: Proc[]; mem: Proc[]; net?: NetProc[] }
 
 const isMac = process.platform === 'darwin';
 const round = (x: number, places = 1) => Math.round(x * 10 ** places) / 10 ** places;
@@ -81,6 +83,8 @@ export function createCollector(diskPath: string, intervalMs: number) {
   let slow: Pick<Reading, 'bat' | 'ac' | 'hot'> = {};
   let prevProcTicks = new Map<number, number>(); // Linux: pid -> CPU clock ticks, for per-process rates
   let prevProcAt = 0;
+  let prevNetBytes = new Map<number, { rx: number; tx: number }>(); // macOS: pid -> bytes so far, from nettop
+  let prevNetAt = 0;
 
   // Linux clock ticks per second and page size, read once. Without getconf (BusyBox, minimal
   // containers) the page size comes from /proc/self/smaps, since guessing 4096 would understate
@@ -311,15 +315,52 @@ export function createCollector(diskPath: string, intervalMs: number) {
   }
 
   // Top processes by CPU and by memory.
+  // macOS nettop reports bytes in and out per process since it started; the rate is the
+  // difference between two calls, as with Linux CPU ticks.
+  async function macNetProcs(now: number): Promise<NetProc[] | null> {
+    const out = await run('nettop', ['-P', '-L', '1', '-J', 'bytes_in,bytes_out', '-x']);
+    const bytes = out ? parseNettop(out) : null;
+    const dt = (now - prevNetAt) / 1000;
+    const haveRates = prevNetAt > 0 && now - prevNetAt <= maxGapMs;
+    const list: NetProc[] = [];
+    for (const [pid, b] of bytes ?? []) {
+      const before = prevNetBytes.get(pid);
+      if (!haveRates || !before || b.rx < before.rx || b.tx < before.tx) continue;
+      const rx = Math.round((b.rx - before.rx) / dt);
+      const tx = Math.round((b.tx - before.tx) / dt);
+      if (rx + tx > 0) list.push({ pid, name: b.name, rx, tx });
+    }
+    prevNetBytes = bytes ? new Map([...bytes].map(([pid, b]) => [pid, { rx: b.rx, tx: b.tx }])) : new Map();
+    prevNetAt = now;
+    return bytes ? list : null;
+  }
+
+  // Top processes by CPU, memory and (on macOS) network.
   async function procs(now: number): Promise<Procs | null> {
-    const list = isMac ? await macProcs() : await linuxProcs(now);
+    const [list, net] = await Promise.all([
+      isMac ? macProcs() : linuxProcs(now),
+      isMac ? macNetProcs(now) : Promise.resolve(null),
+    ]);
     if (!list) return null;
     const byCpu = list.filter((p) => p.cpu !== null).sort((a, b) => b.cpu! - a.cpu!).slice(0, 5);
     const byMem = [...list].sort((a, b) => b.mb - a.mb).slice(0, 5);
-    return { cpu: byCpu, mem: byMem };
+    const top: Procs = { cpu: byCpu, mem: byMem };
+    if (net) top.net = net.sort((a, b) => b.rx + b.tx - (a.rx + a.tx)).slice(0, 5);
+    return top;
   }
 
   return { sample, procs };
+}
+
+// nettop -P -L 1 -J bytes_in,bytes_out -x: a header, then "name.pid,bytes_in,bytes_out," per process.
+// The name can itself contain dots, so the pid is the digits after the last one.
+export function parseNettop(text: string): Map<number, { name: string; rx: number; tx: number }> {
+  const out = new Map<number, { name: string; rx: number; tx: number }>();
+  for (const line of text.split('\n')) {
+    const m = /^(.+)\.(\d+),(\d+),(\d+),?\s*$/.exec(line);
+    if (m) out.set(Number(m[2]), { name: m[1], rx: Number(m[3]), tx: Number(m[4]) });
+  }
+  return out;
 }
 
 // One /proc/<pid>/stat line (see proc(5)). The name sits in parentheses and may itself contain

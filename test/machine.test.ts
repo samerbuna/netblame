@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { machineStatus, judgingWindow, parseProcStat } from '../src/machine.ts';
+import { machineStatus, judgingWindow, parseProcStat, parseNettop } from '../src/machine.ts';
 
 type Over = Record<string, number | null | undefined>;
 const base = { cpu: 20, mem: 50, so: 0, disk: 50, dgb: 500 };
@@ -65,4 +65,13 @@ test('machineStatus: weak Wi-Fi, averaged, only while on Wi-Fi', () => {
   assert.equal(machineStatus(series({ rssi: -75 })).s, 'up');
   // moved to Ethernet: the latest sample has no Wi-Fi reading
   assert.equal(machineStatus([...series({ rssi: -85 }, 6), { t: 60_000, ...base }]).s, 'up');
+});
+
+test('parseNettop: pid after the last dot, header skipped', () => {
+  const out = ',bytes_in,bytes_out,\nmDNSResponder.194,6512071,947192,\nGoogle Chrome H.577,114924,12256,\ncom.apple.WebKit.Networking.902,10,20,\n';
+  assert.deepEqual([...parseNettop(out)], [
+    [194, { name: 'mDNSResponder', rx: 6512071, tx: 947192 }],
+    [577, { name: 'Google Chrome H', rx: 114924, tx: 12256 }],
+    [902, { name: 'com.apple.WebKit.Networking', rx: 10, tx: 20 }],
+  ]);
 });
