@@ -1,7 +1,7 @@
 // The page: connects to the local monitor's event stream and draws the status, charts and tables.
 
 import { fmtMs, fmtDur, fmtTime, fmtBytes } from './lib/format.js';
-import { heroAt, statusSince, outages as findOutages, sliceFrom, uptime, fmtUptime, median, percentile } from './lib/status.js';
+import { heroAt, statusSince, outages as findOutages, sliceFrom, uptime, fmtUptime, median, percentile, jitter } from './lib/status.js';
 
 const LABELS = { up: 'Online', warn: 'Degraded', down: 'Offline', idle: 'Monitor not running' };
 const ICONS = { up: '✓', warn: '!', down: '✕', idle: '…' };
@@ -131,7 +131,11 @@ function renderHero() {
     else setLayer('layer-router', false, 'No route', 'not on a network');
   }
   else setLayer('layer-router', last.g !== null, last.g !== null ? `${fmtMs(last.g)} ms` : 'No reply', gateway || '');
-  setLayer('layer-internet', last.n !== null, last.n !== null ? `${fmtMs(last.n)} ms` : 'No reply', config.pingHost);
+  // Amber while the server says the connection is lossy, jittery or slow under load.
+  const minute = sliceFrom(samples, Date.now() - 60000).map((x) => x.n).filter((v) => v !== null);
+  const j = jitter(minute);
+  setLayer('layer-internet', last.n === null ? false : last.q ? 'w' : true, last.n !== null ? `${fmtMs(last.n)} ms` : 'No reply',
+    j === null ? config.pingHost : `jitter ${fmtMs(j)} ms · ${config.pingHost}`);
   setLayer('layer-dns', last.d !== null, last.d !== null ? `${fmtMs(last.d)} ms` : 'No answer', 'uncached lookup');
 
   let web = null;
@@ -187,7 +191,10 @@ function renderTiles() {
   const ns = win.map((x) => x.n).filter((v) => v !== null);
   const med = median(ns);
   setTile('t-latency', fmtMs(med), med == null ? '' : 'ms');
-  $('t-latency-sub').textContent = ns.length ? `95th percentile ${fmtMs(percentile(ns, 0.95))} ms` : 'no successful pings';
+  const j = jitter(ns);
+  $('t-latency-sub').textContent = ns.length
+    ? `95th percentile ${fmtMs(percentile(ns, 0.95))} ms${j === null ? '' : ` · jitter ${fmtMs(j)} ms`}`
+    : 'no successful pings';
 
   const lost = win.filter((x) => x.n === null).length;
   const loss = (lost / win.length) * 100;

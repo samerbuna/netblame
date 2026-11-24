@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import type { Config } from './config.ts';
 import { ping, dnsCheck, httpCheck, findGateway } from './checks.ts';
 import type { HttpResult } from './checks.ts';
-import { judgeNetwork } from './netrules.ts';
+import { judgeNetwork, linkQuality, QUALITY } from './netrules.ts';
+import { sliceFrom } from '../public/lib/status.js';
 import type { Sample } from './netrules.ts';
 import { createCollector, machineStatus } from './machine.ts';
 import type { MachineSample, Procs } from './machine.ts';
@@ -90,6 +91,15 @@ export function createMonitor(cfg: Config) {
     if (h) sample.h = h.ms;
     if (h?.portal) sample.p = 1;
     if (judged.r) sample.r = judged.r;
+    // A working connection can still be lossy, jittery or slow under load.
+    if (sample.s === 'up') {
+      const quality = linkQuality([...sliceFrom(samples, now - QUALITY.baselineMs), sample], sliceFrom(machineSamples, now - QUALITY.loadedMs), now);
+      if (quality.q) {
+        sample.s = 'warn';
+        sample.r = quality.r;
+        sample.q = quality.q;
+      }
+    }
 
     if (sample.s !== lastSample?.s) logChange(sample);
     samples.push(sample);
