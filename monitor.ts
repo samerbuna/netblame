@@ -2,7 +2,7 @@
 // Runs layered checks every few seconds (router ping, internet ping, uncached DNS,
 // HTTP 204) and streams the results to index.html over Server-Sent Events.
 //
-// Run: node monitor.ts   (Node 22.18+ runs TypeScript directly, no build step)
+// Run: node monitor.ts   (Node ^22.18 or >=23.6 runs TypeScript directly, no build step)
 
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
