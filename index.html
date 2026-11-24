@@ -307,33 +307,37 @@
     return samples[i].t;
   }
 
-  // Runs of "down" samples. An outage ends at the first sample that isn't down,
-  // or at the last down sample plus one tick if the record stops there.
+  // When the time sample i stands for ends: at the next sample, one tick later if the
+  // record stops there, or now for the latest sample while the monitor is running.
+  // Both the outage table and the uptime tile use this, so they agree.
+  function sampleEnd(i, now) {
+    const x = samples[i];
+    const next = samples[i + 1];
+    if (next) return contiguous(x, next) ? next.t : x.t + config.tickMs;
+    return currentStatus() !== 'idle' ? now : x.t + config.tickMs;
+  }
+
+  // Runs of "down" samples. Each outage ends where its last down sample's time ends:
+  // at the first sample that isn't down, at a gap in the record, or now if ongoing.
   function outages() {
+    const now = Date.now();
     const list = [];
     let cur = null;
     for (let i = 0; i < samples.length; i++) {
       const x = samples[i];
-      const prev = samples[i - 1];
-      if (cur && prev && !contiguous(prev, x)) {
-        cur.end = prev.t + config.tickMs;
-        list.push(cur);
+      if (x.s !== 'down') {
         cur = null;
+        continue;
       }
-      if (x.s === 'down') {
-        if (!cur) cur = { start: x.t, end: null, reasons: {} };
-        if (x.r) cur.reasons[x.r] = (cur.reasons[x.r] || 0) + 1;
-      } else if (cur) {
-        cur.end = x.t;
+      if (!cur) {
+        cur = { start: x.t, end: x.t, reasons: {} };
         list.push(cur);
-        cur = null;
       }
-    }
-    if (cur) {
-      const last = samples[samples.length - 1];
-      cur.ongoing = currentStatus() === 'down';
-      cur.end = cur.ongoing ? Date.now() : last.t + config.tickMs;
-      list.push(cur);
+      if (x.r) cur.reasons[x.r] = (cur.reasons[x.r] || 0) + 1;
+      cur.end = sampleEnd(i, now);
+      if (i === samples.length - 1) cur.ongoing = currentStatus() === 'down';
+      // A gap in the record ends the outage; a down sample after it starts a new one.
+      if (cur.end !== samples[i + 1]?.t) cur = null;
     }
     for (const o of list) {
       o.reason = Object.entries(o.reasons).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
@@ -424,16 +428,6 @@
     let i = samples.length;
     while (i > 0 && samples[i - 1].t >= from) i--;
     return samples.slice(i);
-  }
-
-  // When the time sample i stands for ends: at the next sample, one tick later if the
-  // record stops there, or now for the latest sample while the monitor is running.
-  // These are the same ends outages() uses, so the tiles agree with the outage table.
-  function sampleEnd(i, now) {
-    const x = samples[i];
-    const next = samples[i + 1];
-    if (next) return contiguous(x, next) ? next.t : x.t + config.tickMs;
-    return currentStatus() !== 'idle' ? now : x.t + config.tickMs;
   }
 
   function renderTiles() {
