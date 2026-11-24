@@ -14,7 +14,7 @@ export const VERSION: string = JSON.parse(fs.readFileSync(path.join(ROOT, 'packa
 
 // The environment variables people can set. install copies the ones that are set into the login service.
 export const SETTING_NAMES = [
-  'PORT', 'TICK_MS', 'KEEP_DAYS', 'PING_HOST', 'HTTP_URL', 'DNS_ZONE', 'MACHINE_MS', 'DISK_PATH', 'DATA_DIR',
+  'PORT', 'TICK_MS', 'KEEP_DAYS', 'PING_HOST', 'HTTP_URL', 'DNS_ZONE', 'MACHINE_MS', 'DISK_PATH', 'DATA_DIR', 'NOTIFY',
 ] as const;
 
 export interface Config {
@@ -27,6 +27,7 @@ export interface Config {
   machineMs: number;       // time between machine health samples
   diskPath: string;        // free space is watched on the volume holding this path
   dataDir: string;
+  notify: boolean;         // desktop notifications; NOTIFY=0 turns them off
   httpEveryMs: number;     // routine web check; it also runs whenever another check fails
   // A longer pause between samples means the machine slept or the monitor was stopped.
   // One round can take ~8s when everything times out, so leave room for that.
@@ -62,6 +63,7 @@ export function loadConfig(env: Env = process.env): Config {
     machineMs,
     diskPath: env.DISK_PATH || '/',
     dataDir: env.DATA_DIR ? path.resolve(env.DATA_DIR) : defaultDataDir(),
+    notify: env.NOTIFY !== '0',
     httpEveryMs: 30_000,
     gapMs: tickMs * 2 + 10_000,
     machineGapMs: machineMs * 2 + 10_000,

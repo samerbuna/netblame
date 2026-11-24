@@ -12,6 +12,8 @@ import type { Sample } from './netrules.ts';
 import { createCollector, machineStatus } from './machine.ts';
 import type { MachineSample, Procs } from './machine.ts';
 import { persist, loadRange, dropOlderThan, pruneOldFiles, MACHINE, EVENTS } from './history.ts';
+import { createNotifier, sendNote } from './notify.ts';
+import type { Note } from './notify.ts';
 
 const GATEWAY_REFRESH_MS = 30_000;
 const HISTORY_MS = 24 * 60 * 60 * 1000; // what the page gets on connect
@@ -41,12 +43,14 @@ export interface Snapshot {
   machine: { samples: MachineSample[]; procs: Procs | null };
 }
 
-export function createMonitor(cfg: Config) {
+// send: how notifications are shown, replaceable for testing.
+export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote) {
   const listeners = new Set<Listener>();
   const emit = (event: string, data: unknown) => {
     for (const l of listeners) l(event, data);
   };
   let viewers = 0;
+  let notifier: ReturnType<typeof createNotifier> | null = null;
   const timers: NodeJS.Timeout[] = [];
   let stopped = false;
 
@@ -119,6 +123,7 @@ export function createMonitor(cfg: Config) {
     }
 
     if (sample.s !== lastSample?.s) logChange(sample);
+    tell(notifier?.network(sample));
     samples.push(sample);
     samples = dropOlderThan(samples, now - HISTORY_MS);
 
@@ -151,6 +156,12 @@ export function createMonitor(cfg: Config) {
   // What the page shows about the current route.
   const link = () => ({ gateway, iface: gatewayIface, vpn, hotspot: isPhoneHotspot(gateway) });
 
+  function tell(note: Note | null | undefined): void {
+    if (!note) return;
+    console.log(`${new Date().toLocaleTimeString()}  NOTIFIED  ${note.title}: ${note.body}`);
+    send(note);
+  }
+
   function logChange(x: Sample): void {
     const label = { up: 'ONLINE ', warn: 'DEGRADED', down: 'OFFLINE' }[x.s];
     console.log(`${new Date(x.t).toLocaleTimeString()}  ${label}  ${x.r ?? ''}`);
@@ -180,6 +191,7 @@ export function createMonitor(cfg: Config) {
     if (sample.s !== machineSamples.at(-1)?.s) {
       console.log(`${new Date(now).toLocaleTimeString()}  ${sample.s === 'up' ? 'MACHINE OK  ' : 'MACHINE WARN'}  ${sample.r ?? ''}`);
     }
+    tell(notifier?.machine(sample));
     machineSamples.push(sample);
     machineSamples = dropOlderThan(machineSamples, now - HISTORY_MS);
 
@@ -208,6 +220,7 @@ export function createMonitor(cfg: Config) {
     start(): void {
       fs.mkdirSync(cfg.dataDir, { recursive: true });
       const now = Date.now();
+      if (cfg.notify) notifier = createNotifier(now, cfg.gapMs, cfg.machineGapMs);
       samples = loadRange<Sample>(cfg.dataDir, now - HISTORY_MS, now);
       events = loadRange<MonitorEvent>(cfg.dataDir, now - HISTORY_MS, now, EVENTS);
       machineSamples = loadRange<MachineSample>(cfg.dataDir, now - HISTORY_MS, now, MACHINE);
