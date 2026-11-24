@@ -97,6 +97,10 @@
   .layer-name .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); flex: none; }
   .layer[data-ok="1"] .dot { background: var(--good); }
   .layer[data-ok="0"] .dot { background: var(--critical); }
+  .layer[data-ok="w"] .dot { background: var(--warning); }
+  .layers-title { font-size: 12px; font-weight: 600; color: var(--muted); margin: 16px 0 -8px; }
+  .machine-note { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+  .machine-note:empty { display: none; }
   .layer-value { font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .layer-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -174,6 +178,7 @@
         <div class="hero-since" id="since"></div>
       </div>
     </div>
+    <div class="layers-title">Network</div>
     <div class="layers">
       <div class="layer" id="layer-router">
         <div class="layer-name"><span class="dot"></span>Router</div>
@@ -192,6 +197,26 @@
         <div class="layer-value">—</div><div class="layer-sub"></div>
       </div>
     </div>
+    <div class="layers-title">This machine</div>
+    <div class="layers">
+      <div class="layer" id="layer-cpu">
+        <div class="layer-name"><span class="dot"></span>CPU</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-mem">
+        <div class="layer-name"><span class="dot"></span>Memory</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-disk">
+        <div class="layer-name"><span class="dot"></span>Disk</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-swap">
+        <div class="layer-name"><span class="dot"></span>Swap</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+    </div>
+    <div class="machine-note" id="machine-note"></div>
   </section>
 
   <div class="filters" role="group" aria-label="Time range">
@@ -246,9 +271,11 @@
   const LABELS = { up: 'Online', warn: 'Degraded', down: 'Offline', idle: 'Monitor not running' };
   const ICONS = { up: '✓', warn: '!', down: '✕', idle: '…' };
 
-  let config = { tickMs: 3000, gapMs: 11000, pingHost: '1.1.1.1', httpUrl: '', httpEveryMs: 30000 };
+  let config = { tickMs: 3000, gapMs: 11000, pingHost: '1.1.1.1', httpUrl: '', httpEveryMs: 30000, machineMs: 10000, machineGapMs: 30000, diskPath: '/' };
   let gateway = null;
   let samples = [];
+  let machine = []; // machine health samples, same 24 hours
+  let procs = null; // latest top processes, live only
   let connected = false;
   let triedOnce = false; // true after the first connect attempt succeeds or fails
   let rangeMs = 3600000;
@@ -298,13 +325,36 @@
     return last.s;
   }
 
-  // How long the current status has held, without crossing a gap in the record.
-  function statusSince() {
-    let i = samples.length - 1;
+  // The latest machine sample, or null when they've stopped arriving.
+  function currentMachine() {
+    const last = machine[machine.length - 1];
+    if (!connected || !last || Date.now() - last.t > config.machineGapMs) return null;
+    return last;
+  }
+
+  // What the hero shows. Offline and "not running" are about the network only;
+  // a machine warning turns an otherwise healthy status Degraded.
+  function heroStatus() {
+    const net = currentStatus();
+    if (net === 'idle' || net === 'down') return net;
+    return currentMachine()?.s === 'warn' ? 'warn' : net;
+  }
+
+  // How long a series' current status has held, without crossing a gap in the record.
+  function runStart(list, gapMs) {
+    let i = list.length - 1;
     if (i < 0) return null;
-    const s = samples[i].s;
-    while (i > 0 && samples[i - 1].s === s && contiguous(samples[i - 1], samples[i])) i--;
-    return samples[i].t;
+    const s = list[i].s;
+    while (i > 0 && list[i - 1].s === s && list[i].t - list[i - 1].t <= gapMs) i--;
+    return list[i].t;
+  }
+
+  // The hero's status changes whenever either the network's or the machine's does.
+  function statusSince() {
+    const net = runStart(samples, config.gapMs);
+    const mach = currentMachine() ? runStart(machine, config.machineGapMs) : null;
+    if (net === null) return mach;
+    return mach === null ? net : Math.max(net, mach);
   }
 
   // When the time sample i stands for ends: at the next sample, one tick later if the
@@ -347,16 +397,48 @@
 
   // ---------- rendering: hero and layers ----------
 
+  // ok: true (green), false (red), 'w' (amber), or null (grey, unknown).
   function setLayer(id, ok, value, sub) {
     const el = $(id);
-    el.dataset.ok = ok == null ? '' : ok ? '1' : '0';
+    el.dataset.ok = ok == null ? '' : ok === 'w' ? 'w' : ok ? '1' : '0';
     el.querySelector('.layer-value').textContent = value;
     el.querySelector('.layer-sub').textContent = sub;
   }
 
+  function fmtBytes(n, perSecond = false) {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    while (n >= 1000 && i < units.length - 1) { n /= 1000; i++; }
+    return `${n < 10 && i ? n.toFixed(1) : Math.round(n)} ${units[i]}${perSecond ? '/s' : ''}`;
+  }
+
+  function renderMachineLayers() {
+    const m = currentMachine();
+    if (!m) {
+      for (const id of ['layer-cpu', 'layer-mem', 'layer-disk', 'layer-swap']) setLayer(id, null, '—', '');
+      $('machine-note').textContent = '';
+      return;
+    }
+    // The server judges CPU, memory and swap on a minute's average and lists what's over its limit in w.
+    const ok = (key, value) => (value == null ? null : m.w?.includes(key) ? 'w' : true);
+    setLayer('layer-cpu', ok('cpu', m.cpu), m.cpu == null ? '—' : `${Math.round(m.cpu)}%`, `load ${m.load.toFixed(2)}`);
+    setLayer('layer-mem', ok('mem', m.mem), m.mem == null ? '—' : `${Math.round(m.mem)}% used`, '');
+    setLayer('layer-disk', ok('disk', m.dgb), m.dgb == null ? '—' : `${fmtBytes(m.dgb * 1e9)} free`,
+      m.disk == null ? '' : `${Math.round(m.disk)}% of ${config.diskPath}`);
+    setLayer('layer-swap', ok('swap', m.swap), m.swap == null ? '—' : `${fmtBytes(m.swap * 1e6)} used`,
+      m.so == null ? '' : m.so > 0 ? `writing ${fmtBytes(m.so * 1024, true)}` : 'not swapping now');
+
+    const notes = [];
+    if (m.bat !== undefined) notes.push(`Battery ${m.bat}%${m.ac ? ', on power' : ''}`);
+    if (m.hot) notes.push('CPU slowed down for heat');
+    $('machine-note').textContent = notes.join(' · ');
+  }
+
   function renderHero() {
-    const status = currentStatus();
+    const status = heroStatus();
     const last = samples[samples.length - 1];
+    const m = currentMachine();
+    renderMachineLayers();
     $('hero').dataset.status = status;
     $('orb').textContent = ICONS[status];
     $('label').textContent = LABELS[status];
@@ -371,7 +453,10 @@
         : 'Can’t reach the monitor on localhost. Start it with: node monitor.ts';
       $('since').textContent = last ? `Last check ${fmtTime(last.t)}` : '';
     } else {
-      $('reason').textContent = status === 'up' ? 'All checks passing' : (last.r || '');
+      const reasons = [];
+      if (last.s !== 'up' && last.r) reasons.push(last.r);
+      if (m?.s === 'warn' && m.r) reasons.push(m.r);
+      $('reason').textContent = status === 'up' ? 'All checks passing' : reasons.join(' · ');
       const since = statusSince();
       $('since').textContent = since ? `for ${fmtDur(Date.now() - since)}, since ${fmtTime(since, false)}` : '';
     }
@@ -763,9 +848,11 @@
     const es = new EventSource('/events');
     es.addEventListener('init', (e) => {
       const data = JSON.parse(e.data);
-      config = data.config;
+      config = { ...config, ...data.config };
       gateway = data.gateway;
       samples = data.samples;
+      machine = data.machine?.samples ?? [];
+      procs = data.machine?.procs ?? null;
       connected = true;
       triedOnce = true;
       renderAll();
@@ -777,6 +864,14 @@
       const cutoff = Date.now() - 86400000;
       if (samples.length && samples[0].t < cutoff) samples = samples.filter((x) => x.t >= cutoff);
       renderAll();
+    });
+    es.addEventListener('machine', (e) => {
+      const data = JSON.parse(e.data);
+      machine.push(data.sample);
+      procs = data.procs;
+      const cutoff = Date.now() - 86400000;
+      if (machine.length && machine[0].t < cutoff) machine = machine.filter((x) => x.t >= cutoff);
+      renderHero();
     });
     es.addEventListener('error', () => {
       // EventSource retries on its own; just show that we're cut off meanwhile.

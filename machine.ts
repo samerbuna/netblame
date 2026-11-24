@@ -35,9 +35,12 @@ export interface MachineSample {
   ac?: 0 | 1;           // 1 when on power
   hot?: 1;              // CPU slowed down for heat
   r?: string;           // why, when status is "warn"
+  w?: WarnKey[];        // which readings are over their limit, when status is "warn"
 }
 
-export type Reading = Omit<MachineSample, 't' | 's' | 'r'>;
+export type WarnKey = 'disk' | 'mem' | 'swap' | 'cpu' | 'bat' | 'hot';
+
+export type Reading = Omit<MachineSample, 't' | 's' | 'r' | 'w'>;
 
 export interface Proc { pid: number; name: string; cpu: number | null; mb: number }
 export interface Procs { cpu: Proc[]; mem: Proc[] }
@@ -271,7 +274,7 @@ export function createCollector(diskPath: string, intervalMs: number) {
 // recent: the machine samples from the last WINDOW_MS, oldest first, ending with the one being judged.
 // CPU, memory and swap are averaged so a short spike doesn't count, and they're only judged once
 // the window is mostly covered (not right after start or wake).
-export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 'so' | 'disk' | 'dgb' | 'bat' | 'ac' | 'hot'>[]): { s: 'up' | 'warn'; r?: string } {
+export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 'so' | 'disk' | 'dgb' | 'bat' | 'ac' | 'hot'>[]): { s: 'up' | 'warn'; r?: string; w?: WarnKey[] } {
   const x = recent[recent.length - 1];
   if (!x) return { s: 'up' };
   const covered = x.t - recent[0].t >= WINDOW_MS * 0.75;
@@ -281,19 +284,24 @@ export function machineStatus(recent: Pick<MachineSample, 't' | 'cpu' | 'mem' | 
   };
 
   const reasons: string[] = [];
+  const keys: WarnKey[] = [];
+  const warn = (key: WarnKey, text: string) => {
+    keys.push(key);
+    reasons.push(text);
+  };
   if (x.dgb !== null && x.disk !== null && (x.disk < LIMITS.diskPct || x.dgb < LIMITS.diskGb)) {
-    reasons.push(`Disk almost full (${x.dgb < 10 ? x.dgb.toFixed(1) : Math.round(x.dgb)} GB free)`);
+    warn('disk', `Disk almost full (${x.dgb < 10 ? x.dgb.toFixed(1) : Math.round(x.dgb)} GB free)`);
   }
   if (covered) {
     const mem = avg('mem');
     const so = avg('so');
     const cpu = avg('cpu');
-    if (mem !== null && mem > LIMITS.memPct) reasons.push(`Memory almost full (${Math.round(mem)}% in use)`);
-    if (so !== null && so > LIMITS.swapOutKBs) reasons.push(`Swapping heavily (${(so / 1024).toFixed(1)} MB/s to disk)`);
-    if (cpu !== null && cpu > LIMITS.cpuPct) reasons.push(`CPU busy (${Math.round(cpu)}% over the last minute)`);
+    if (mem !== null && mem > LIMITS.memPct) warn('mem', `Memory almost full (${Math.round(mem)}% in use)`);
+    if (so !== null && so > LIMITS.swapOutKBs) warn('swap', `Swapping heavily (${(so / 1024).toFixed(1)} MB/s to disk)`);
+    if (cpu !== null && cpu > LIMITS.cpuPct) warn('cpu', `CPU busy (${Math.round(cpu)}% over the last minute)`);
   }
-  if (x.bat !== undefined && x.ac === 0 && x.bat < LIMITS.batteryPct) reasons.push(`Battery low (${x.bat}%)`);
-  if (x.hot) reasons.push('CPU slowed down for heat');
+  if (x.bat !== undefined && x.ac === 0 && x.bat < LIMITS.batteryPct) warn('bat', `Battery low (${x.bat}%)`);
+  if (x.hot) warn('hot', 'CPU slowed down for heat');
 
-  return reasons.length ? { s: 'warn', r: reasons.join('; ') } : { s: 'up' };
+  return reasons.length ? { s: 'warn', r: reasons.join('; '), w: keys } : { s: 'up' };
 }

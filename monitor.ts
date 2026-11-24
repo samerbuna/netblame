@@ -258,6 +258,7 @@ async function machineTick(): Promise<void> {
   const status = machineStatus([...recent, { t: now, ...reading }]);
   const sample: MachineSample = { t: now, s: status.s, ...reading };
   if (status.r) sample.r = status.r;
+  if (status.w) sample.w = status.w;
 
   if (sample.s !== machineSamples.at(-1)?.s) {
     console.log(`${new Date(now).toLocaleTimeString()}  ${sample.s === 'up' ? 'MACHINE OK  ' : 'MACHINE WARN'}  ${sample.r ?? ''}`);
