@@ -15,6 +15,7 @@ export interface Source {
   subscribe(fn: (event: string, data: unknown) => void): () => void;
   watching(n: number): void;
   report(days: number): string; // plain-text outage report
+  speedTest(): 'started' | 'running' | 'unavailable';
 }
 
 const TYPES: Record<string, string> = {
@@ -56,6 +57,21 @@ export function createServer(source: Source, publicDir: string): http.Server {
       return;
     }
     const url = new URL(req.url ?? '/', `http://${host}`);
+
+    // A page on any site can send a POST to localhost (the Host header is then right), so actions
+    // that cost something, like a speed test that moves hundreds of MB, also need this page's Origin.
+    if (req.method === 'POST') {
+      const origin = req.headers.origin;
+      if (origin !== `http://localhost:${port}` && origin !== `http://127.0.0.1:${port}`) {
+        res.writeHead(403).end('Forbidden');
+        return;
+      }
+      if (url.pathname === '/speedtest') {
+        const result = source.speedTest();
+        json(res, result === 'started' ? 202 : result === 'running' ? 409 : 404, { result });
+        return;
+      }
+    }
 
     if (req.method === 'GET' && files.has(url.pathname)) {
       const file = files.get(url.pathname)!;

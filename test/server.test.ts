@@ -17,6 +17,10 @@ const source = {
     viewers = n;
   },
   report: (days: number) => `report for ${days} days\n`,
+  speedTests: 0,
+  speedTest() {
+    return this.speedTests++ ? 'running' as const : 'started' as const;
+  },
 };
 
 const server = createServer(source, PUBLIC_DIR);
@@ -28,9 +32,9 @@ after(() => {
 });
 
 // Raw requests, since fetch won't let us set Host.
-function get(pathname: string, headers: Record<string, string> = {}): Promise<{ status: number; type: string; body: string }> {
+function get(pathname: string, headers: Record<string, string> = {}, method = 'GET'): Promise<{ status: number; type: string; body: string }> {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, path: pathname, headers: { host: `localhost:${port}`, ...headers } }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: pathname, headers: { host: `localhost:${port}`, ...headers } }, (res) => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', (c) => (body += c));
@@ -93,4 +97,16 @@ test('report: plain text, days clamped to 1-31', async () => {
   assert.equal((await get('/report?days=400')).body, 'report for 31 days\n');
   assert.equal((await get('/report?days=abc')).body, 'report for 7 days\n');
   assert.equal((await get('/report')).body, 'report for 7 days\n');
+});
+
+test('POST needs this page\'s Origin; a speed test runs one at a time', async () => {
+  const post = (origin?: string) => get('/speedtest', origin ? { origin } : {}, 'POST');
+  assert.equal((await post()).status, 403);
+  assert.equal((await post('https://evil.example')).status, 403);
+  assert.equal((await post(`http://localhost:${port + 1}`)).status, 403);
+  assert.equal(source.speedTests, 0);
+  const first = await post(`http://localhost:${port}`);
+  assert.deepEqual([first.status, JSON.parse(first.body)], [202, { result: 'started' }]);
+  assert.equal((await post(`http://127.0.0.1:${port}`)).status, 409);
+  assert.equal((await get('/speedtest')).status, 404);
 });

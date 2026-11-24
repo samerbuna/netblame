@@ -15,6 +15,7 @@ let procs = null; // latest top processes, live only
 let events = []; // network changes, wake from sleep, speed tests: same 24 hours
 let vpn = null; // the VPN's tunnel interface, when one carries traffic
 let hotspot = false; // the router looks like a phone sharing its connection
+let speedRunning = false;
 let connected = false;
 let triedOnce = false; // true after the first connect attempt succeeds or fails
 let rangeMs = 3600000;
@@ -226,8 +227,9 @@ function renderTiles() {
   $('t-loss-sub').textContent = `${lost.toLocaleString()} of ${win.length.toLocaleString()} pings lost`;
 }
 
-function setTile(id, value, unit) {
-  const el = $(id);
+// target: an element or its id.
+function setTile(target, value, unit) {
+  const el = typeof target === 'string' ? $(target) : target;
   el.textContent = value;
   if (unit) {
     const u = document.createElement('span');
@@ -567,6 +569,71 @@ function renderOutages() {
   })));
 }
 
+// ---------- speed test (macOS) ----------
+
+function lastSpeed() {
+  for (let i = events.length - 1; i >= 0; i--) if (events[i].k === 'speed') return events[i];
+  return null;
+}
+
+const mbps = (bits) => (bits == null ? '—' : bits < 1e7 ? (bits / 1e6).toFixed(1) : String(Math.round(bits / 1e6)));
+
+function speedTile(label, value, unit, sub) {
+  const el = document.createElement('div');
+  const l = document.createElement('div');
+  l.className = 'tile-label';
+  l.textContent = label;
+  const v = document.createElement('div');
+  v.className = 'tile-value';
+  setTile(v, value, value === '—' ? '' : unit);
+  const s = document.createElement('div');
+  s.className = 'tile-sub';
+  s.textContent = sub;
+  el.append(l, v, s);
+  return el;
+}
+
+function renderSpeed() {
+  $('speed-card').hidden = !config.speedTest;
+  if (!config.speedTest) return;
+  const button = $('speed-run');
+  button.disabled = speedRunning || !connected;
+  button.textContent = speedRunning ? 'Testing… (about 20s)' : 'Run speed test';
+
+  const cost = hotspot
+    ? 'You’re on a phone hotspot: a test uses several hundred MB of its mobile data.'
+    : 'A test takes about 20 seconds and moves a few hundred MB.';
+  const note = document.createElement('div');
+  note.className = 'tile-sub';
+  const ev = lastSpeed();
+  if (!ev || !ev.speed || ev.speed.error) {
+    note.textContent = `${ev ? `${ev.text}, at ${fmtTime(ev.t, false)}.` : 'No speed test in the last 24 hours.'} ${cost}`;
+    $('speed').replaceChildren(note);
+    return;
+  }
+  const r = ev.speed;
+  const grid = document.createElement('div');
+  grid.className = 'speed-grid';
+  grid.append(
+    speedTile('Download', mbps(r.down), 'Mbps', ''),
+    speedTile('Upload', mbps(r.up), 'Mbps', ''),
+    speedTile('Ping under load', r.rpm ? String(Math.round(60000 / r.rpm)) : '—', 'ms', r.rpm ? `responsiveness ${Math.round(r.rpm)} RPM` : ''),
+    speedTile('Ping idle', r.baseRtt == null ? '—' : fmtMs(r.baseRtt), 'ms', ''),
+  );
+  note.textContent = `Ran at ${fmtTime(ev.t, false)}${r.iface ? ` over ${r.iface}` : ''}. ${cost}`;
+  $('speed').replaceChildren(grid, note);
+}
+
+async function runSpeedTest() {
+  if (hotspot && !confirm('You’re on a phone hotspot. A speed test uses several hundred MB of its mobile data. Run it?')) return;
+  try {
+    const res = await fetch('/speedtest', { method: 'POST' });
+    if (res.status === 202 || res.status === 409) speedRunning = true;
+  } catch { /* the monitor is unreachable; the hero already says so */ }
+  renderSpeed();
+}
+$('speed-run').addEventListener('click', runSpeedTest);
+
 function renderChanges() {
   const box = $('changes');
   const list = events.slice(-50).reverse();
@@ -683,6 +750,7 @@ function renderNetwork() {
   renderHero();
   renderTiles();
   rttChart.render();
+  renderSpeed();
   renderOutages();
   renderChanges();
   renderRecent();
@@ -723,6 +791,7 @@ function connect() {
     setLink(data);
     samples = data.samples;
     events = data.events ?? [];
+    speedRunning = !!data.speedRunning;
     machine = data.machine?.samples ?? [];
     procs = data.machine?.procs ?? null;
     connected = true;
@@ -754,7 +823,12 @@ function connect() {
     const cutoff = Date.now() - 86400000;
     if (events[0].t < cutoff) events = events.filter((x) => x.t >= cutoff);
     renderChanges();
+    renderSpeed();
     rttChart.render();
+  });
+  es.addEventListener('speed', (e) => {
+    speedRunning = JSON.parse(e.data).running;
+    renderSpeed();
   });
   es.addEventListener('error', () => {
     // EventSource retries on its own; just show that we're cut off meanwhile.

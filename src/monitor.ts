@@ -14,6 +14,8 @@ import type { MachineSample, Procs } from './machine.ts';
 import { persist, loadRange, dropOlderThan, pruneOldFiles, MACHINE, EVENTS } from './history.ts';
 import { createNotifier, sendNote } from './notify.ts';
 import { reportFromDisk } from './report.ts';
+import { speedTestAvailable, runSpeedTest, describeSpeed } from './speedtest.ts';
+import type { SpeedResult } from './speedtest.ts';
 import type { Note } from './notify.ts';
 
 const GATEWAY_REFRESH_MS = 30_000;
@@ -25,7 +27,12 @@ export type Listener = (event: string, data: unknown) => void;
 
 // Something that happened, for the timeline: the monitor starting, the machine waking,
 // the network or VPN changing, a speed test.
-export interface MonitorEvent { t: number; k: 'start' | 'wake' | 'net' | 'vpn' | 'speed'; text: string }
+export interface MonitorEvent {
+  t: number;
+  k: 'start' | 'wake' | 'net' | 'vpn' | 'speed';
+  text: string;
+  speed?: SpeedResult; // the numbers, for a speed test
+}
 
 // "en1, router 172.20.10.1 (phone hotspot, uses mobile data), VPN on (utun3)"
 export function describeNetwork(gateway: string | null, iface: string | null, vpn: string | null): string {
@@ -63,6 +70,7 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
   let vpn: string | null = null;          // the tunnel traffic to the ping host leaves through, when a VPN carries it
   let routeKnown = false;                 // false until the first route lookup, which the start event describes
   let events: MonitorEvent[] = [];
+  let speedRunning = false;
   let gatewayCheckedAt = 0;
   let lastHttp: HttpResult | null = null;
   let lastHttpAt = 0;
@@ -145,8 +153,8 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
     vpn = nextVpn;
   }
 
-  function addEvent(t: number, k: MonitorEvent['k'], text: string): void {
-    const ev: MonitorEvent = { t, k, text };
+  function addEvent(t: number, k: MonitorEvent['k'], text: string, speed?: SpeedResult): void {
+    const ev: MonitorEvent = speed ? { t, k, text, speed } : { t, k, text };
     events.push(ev);
     events = dropOlderThan(events, t - HISTORY_MS);
     console.log(`${new Date(t).toLocaleTimeString()}  ${text}`);
@@ -241,8 +249,22 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
       const config = {
         tickMs: cfg.tickMs, gapMs: cfg.gapMs, pingHost: cfg.pingHost, httpUrl: cfg.httpUrl, httpEveryMs: cfg.httpEveryMs,
         machineMs: cfg.machineMs, machineGapMs: cfg.machineGapMs, diskPath: cfg.diskPath, keepDays: cfg.keepDays,
+        speedTest: speedTestAvailable(),
       };
-      return { config, ...link(), samples, events, machine: { samples: machineSamples, procs } };
+      return { config, ...link(), samples, events, speedRunning, machine: { samples: machineSamples, procs } };
+    },
+    // Starts a speed test unless one is running. The result arrives as a 'speed' event.
+    speedTest(): 'started' | 'running' | 'unavailable' {
+      if (!speedTestAvailable()) return 'unavailable';
+      if (speedRunning) return 'running';
+      speedRunning = true;
+      emit('speed', { running: true });
+      void runSpeedTest().then((result) => {
+        speedRunning = false;
+        addEvent(Date.now(), 'speed', describeSpeed(result), result);
+        emit('speed', { running: false });
+      });
+      return 'started';
     },
     report(days: number): string {
       return reportFromDisk(cfg, days);
