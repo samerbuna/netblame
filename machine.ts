@@ -282,7 +282,12 @@ export function createCollector(diskPath: string, intervalMs: number) {
     } catch {
       return null;
     }
-    const stats = await Promise.all(pids.map((p) => readText(`/proc/${p}/stat`)));
+    // In batches: thousands of reads at once would hold thousands of file descriptors and queue
+    // ahead of sample()'s counter reads on libuv's 4-thread pool, skewing its rates.
+    const stats: (string | null)[] = [];
+    for (let k = 0; k < pids.length; k += 64) {
+      stats.push(...(await Promise.all(pids.slice(k, k + 64).map((p) => readText(`/proc/${p}/stat`)))));
+    }
     const dt = (now - prevProcAt) / 1000;
     const haveRates = prevProcAt > 0 && now - prevProcAt <= maxGapMs;
     const ticks = new Map<number, number>();
