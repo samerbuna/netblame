@@ -469,7 +469,8 @@
       $('machine-note').textContent = '';
       return;
     }
-    // The server judges CPU, memory and swap on a minute's average and lists what's over its limit in w.
+    // The server judges CPU, memory and swap on an average over its judging window (a minute, or
+    // four samples when MACHINE_MS is longer) and lists what's over its limit in w.
     const ok = (key, value) => (value == null ? null : m.w?.includes(key) ? 'w' : true);
     setLayer('layer-cpu', ok('cpu', m.cpu), m.cpu == null ? '—' : `${Math.round(m.cpu)}%`, `load ${m.load.toFixed(2)}`);
     setLayer('layer-mem', ok('mem', m.mem), m.mem == null ? '—' : `${Math.round(m.mem)}% used`, '');
