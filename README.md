@@ -27,12 +27,14 @@ Every 10 seconds it also records CPU use, memory in use, swap, free disk space, 
 
 The status turns Degraded, with the reason shown, when:
 
-- free disk space is under 10% or under 5 GB on `/` (or `DISK_PATH`);
+- free disk space on `/` (or `DISK_PATH`) is under 5 GB, or under 10% while also under 50 GB, so a big disk with hundreds of GB free doesn't count as full;
 - memory in use averages over 90% for a minute (on macOS this is the figure memory pressure is based on, not `free` pages, which are near zero on a healthy Mac);
 - the machine averages over 1 MB/s of swap-outs for a minute;
 - CPU averages over 90% for a minute;
 - the battery is under 10% and not on power;
 - macOS reports the CPU slowed down for heat (not checked on Linux).
+
+The averages cover a minute, or four samples if `MACHINE_MS` is set longer than 15 seconds.
 
 The page also lists the processes using the most CPU and memory. That list is collected only while the page is open and isn't saved.
 
