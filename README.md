@@ -2,11 +2,9 @@
 
 A local page that tells you whether a bad connection is your Wi-Fi, your router, your ISP, DNS, or this machine. It checks every few seconds, keeps a week of history, notifies you when something goes wrong, and gives you an outage report to send your ISP.
 
-```zsh
-npx is-it-me            # start monitoring and open the page
-npx is-it-me install    # keep it running: start now and at every login
-npx is-it-me report     # outage report for the last 7 days
-```
+- `npx is-it-me` starts monitoring and opens the page.
+- `npx is-it-me install` keeps it running: it starts now and at every login.
+- `npx is-it-me report` prints an outage report for the last 7 days.
 
 Needs Node 22 or newer, on macOS or Linux. It has no dependencies and needs no sudo. Nothing is sent anywhere except the checks themselves (see Privacy).
 
@@ -129,13 +127,11 @@ The server listens on 127.0.0.1 only and refuses requests whose Host header isn'
 
 ## Development
 
-```zsh
-npm install      # TypeScript, for type checking only
-npm start        # runs src/ directly; needs Node 22.18+ or 23.6+
-npm test         # node --test
-npm run check    # tsc
-npm run build    # dist/, the JavaScript the npm package runs
-```
+- `npm install` installs TypeScript, which is only used for type checking.
+- `npm start` runs `src/` directly. Running from source needs Node 22.18+ or 23.6+.
+- `npm test` runs the tests with `node --test`.
+- `npm run check` type-checks with `tsc`.
+- `npm run build` writes `dist/`, the JavaScript the npm package runs.
 
 `src/` is the TypeScript server: checks, rules, history, notifications, the login service, the web server. `public/` is the page. The status logic in `public/lib` is shared by the page, the report and the tests. The build uses Node's own type stripper, because Node won't strip types from `.ts` files inside `node_modules`.
 
