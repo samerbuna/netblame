@@ -113,7 +113,7 @@ Set these as environment variables, for example `PORT=4322 npx is-it-me`.
 | `PORT` | `4321` | |
 | `TICK_MS` | `3000` | time between check rounds |
 | `PING_HOST` | `1.1.1.1` | internet ping target |
-| `HTTP_URL` | `http://cp.cloudflare.com/generate_204` | must return 204 |
+| `HTTP_URL` | `http://cp.cloudflare.com/generate_204` | must return 204; keep it http to detect captive portals |
 | `DNS_ZONE` | `example.com` | random names are looked up under this |
 | `KEEP_DAYS` | `7` | days of history files to keep |
 | `MACHINE_MS` | `10000` | time between machine health samples |

@@ -1,6 +1,7 @@
 // The network checks: ping, an uncached DNS lookup, an HTTP 204 fetch, and finding the router.
 
 import http from 'node:http';
+import https from 'node:https';
 import { Resolver } from 'node:dns/promises';
 import { randomBytes } from 'node:crypto';
 import { run } from './exec.ts';
@@ -41,7 +42,18 @@ export async function dnsCheck(zone: string, timeoutMs: number): Promise<Ms> {
 
 export interface HttpResult { ms: Ms; portal: boolean }
 
+// HTTP_URL can be http or https. Over https a captive portal shows up as a failed check rather
+// than an interception, since it can't answer with the right certificate.
 export function httpCheck(url: string, timeoutMs: number): Promise<HttpResult> {
+  const failed: HttpResult = { ms: null, portal: false };
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    return Promise.resolve(failed);
+  }
+  const get = target.protocol === 'https:' ? https.get : target.protocol === 'http:' ? http.get : null;
+  if (!get) return Promise.resolve(failed);
   return new Promise((resolve) => {
     let done = false;
     const finish = (r: HttpResult) => {
@@ -53,7 +65,7 @@ export function httpCheck(url: string, timeoutMs: number): Promise<HttpResult> {
     };
     const t0 = performance.now();
     // agent: false opens a fresh connection each time, so a stale keep-alive socket can't hide a problem.
-    const req = http.get(url, { agent: false, headers: { 'Cache-Control': 'no-cache' } }, (res) => {
+    const req = get(target, { agent: false, headers: { 'Cache-Control': 'no-cache' } }, (res) => {
       res.resume();
       const code = res.statusCode ?? 0;
       const ok = code === 204;
@@ -62,8 +74,8 @@ export function httpCheck(url: string, timeoutMs: number): Promise<HttpResult> {
       // except 511 (Network Authentication Required), the status meant for portals.
       finish({ ms: ok ? round(performance.now() - t0) : null, portal: !ok && (code < 500 || code === 511) });
     });
-    req.on('error', () => finish({ ms: null, portal: false }));
-    const timer = setTimeout(() => finish({ ms: null, portal: false }), timeoutMs);
+    req.on('error', () => finish(failed));
+    const timer = setTimeout(() => finish(failed), timeoutMs);
   });
 }
 

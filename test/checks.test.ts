@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePing, parseRoute, ROUTE_RE, isTunnel, isPhoneHotspot } from '../src/checks.ts';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { parsePing, parseRoute, ROUTE_RE, isTunnel, isPhoneHotspot, httpCheck } from '../src/checks.ts';
 import { describeNetwork } from '../src/monitor.ts';
 
 test('parsePing: macOS and Linux output, and no reply', () => {
@@ -39,4 +41,26 @@ test('describeNetwork: interface, router, hotspot and VPN', () => {
   assert.equal(describeNetwork(null, null, null), 'no network');
   assert.equal(describeNetwork('192.168.1.1', 'en0', null), 'en0, router 192.168.1.1');
   assert.equal(describeNetwork('172.20.10.1', 'en1', 'utun3'), 'en1, router 172.20.10.1 (phone hotspot, uses mobile data), VPN on (utun3)');
+});
+
+test('httpCheck: 204 passes, a page is a portal, 5xx fails, bad URLs fail without throwing', async () => {
+  const server = http.createServer((req, res) => {
+    const code = Number(req.url!.slice(1));
+    res.writeHead(code, code === 302 ? { Location: 'http://login.example/' } : {}).end(code === 204 ? undefined : 'hi');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const ok = await httpCheck(`${base}/204`, 2000);
+    assert.ok(ok.ms !== null && !ok.portal);
+    assert.deepEqual(await httpCheck(`${base}/200`, 2000), { ms: null, portal: true });
+    assert.deepEqual(await httpCheck(`${base}/302`, 2000), { ms: null, portal: true });
+    assert.deepEqual(await httpCheck(`${base}/503`, 2000), { ms: null, portal: false });
+    assert.deepEqual(await httpCheck(`${base}/511`, 2000), { ms: null, portal: true });
+  } finally {
+    server.close();
+  }
+  assert.deepEqual(await httpCheck('https://127.0.0.1:1/', 2000), { ms: null, portal: false });
+  assert.deepEqual(await httpCheck('ftp://example.com/', 2000), { ms: null, portal: false });
+  assert.deepEqual(await httpCheck('not a url', 2000), { ms: null, portal: false });
 });
