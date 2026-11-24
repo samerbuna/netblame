@@ -114,7 +114,7 @@ async function main(args: string[]): Promise<void> {
         process.exitCode = 1;
         return;
       }
-      process.stdout.write(reportFromDisk(cfg, days));
+      process.stdout.write(await reportFromDisk(cfg, days));
       return;
     }
     case '-v':

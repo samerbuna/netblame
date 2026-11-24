@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { persist, loadRange, pruneOldFiles, dropOlderThan, dayStamp, MACHINE } from '../src/history.ts';
+import { persist, loadRange, loadRangeAsync, pruneOldFiles, dropOlderThan, dayStamp, MACHINE } from '../src/history.ts';
 import { defaultDataDir, loadConfig } from '../src/config.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -20,6 +20,8 @@ test('persist and loadRange: by kind and time range, skipping a torn last line',
   assert.deepEqual(loadRange<{ t: number; v: number }>(dir, now - DAY, now).map((x) => x.v), [2, 3]);
   assert.deepEqual(loadRange<{ t: number; v: string }>(dir, now - DAY, now, MACHINE).map((x) => x.v), ['m']);
   assert.deepEqual(loadRange(path.join(dir, 'missing'), 0, now), []);
+  assert.deepEqual((await loadRangeAsync<{ t: number; v: number }>(dir, now - DAY, now)).map((x) => x.v), [2, 3]);
+  assert.deepEqual(await loadRangeAsync(path.join(dir, 'missing'), 0, now), []);
 });
 
 test('pruneOldFiles: removes only this app\'s files older than keepDays', () => {

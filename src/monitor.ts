@@ -267,7 +267,7 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
       });
       return 'started';
     },
-    report(days: number): string {
+    report(days: number): Promise<string> {
       return reportFromDisk(cfg, days);
     },
     subscribe(fn: Listener): () => void {

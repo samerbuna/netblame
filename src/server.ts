@@ -14,7 +14,7 @@ export interface Source {
   init(): Record<string, unknown>;
   subscribe(fn: (event: string, data: unknown) => void): () => void;
   watching(n: number): void;
-  report(days: number): string; // plain-text outage report
+  report(days: number): Promise<string>; // plain-text outage report
   speedTest(): 'started' | 'running' | 'unavailable';
 }
 
@@ -87,7 +87,10 @@ export function createServer(source: Source, publicDir: string): http.Server {
 
     if (req.method === 'GET' && url.pathname === '/report') {
       const days = Math.min(31, Math.max(1, Math.round(Number(url.searchParams.get('days')) || 7)));
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }).end(source.report(days));
+      source.report(days).then(
+        (text) => res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }).end(text),
+        (err) => res.writeHead(500).end(`Couldn't build the report: ${(err as Error).message}`),
+      );
       return;
     }
 

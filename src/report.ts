@@ -4,7 +4,7 @@ import { outages, uptime, fmtUptime, median, percentile, sliceFrom } from '../pu
 import { fmtDur, fmtMs } from '../public/lib/format.js';
 import type { Sample } from './netrules.ts';
 import type { Config } from './config.ts';
-import { loadRange } from './history.ts';
+import { loadRangeAsync } from './history.ts';
 
 export interface ReportOptions {
   from: number;
@@ -68,8 +68,8 @@ export function buildReport(all: Sample[], opts: ReportOptions): string {
 }
 
 // The report for the last `days` days, read from the history files, so it works with the monitor stopped.
-export function reportFromDisk(cfg: Config, days: number, now = Date.now()): string {
+export async function reportFromDisk(cfg: Config, days: number, now = Date.now()): Promise<string> {
   const from = now - days * 24 * 60 * 60 * 1000;
-  const samples = loadRange<Sample>(cfg.dataDir, from - cfg.gapMs, now);
+  const samples = await loadRangeAsync<Sample>(cfg.dataDir, from - cfg.gapMs, now);
   return buildReport(samples, { from, now, tickMs: cfg.tickMs, gapMs: cfg.gapMs, pingHost: cfg.pingHost });
 }

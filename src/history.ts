@@ -28,7 +28,30 @@ export async function persist<T extends { t: number }>(dir: string, x: T, suffix
   }
 }
 
-// Every record of one kind with from <= t <= to, oldest first.
+// The files of one kind that can hold records from `from` to `to`. Picked by the date in their
+// name, so a DST change can't skip a day.
+function filesFor(names: string[], from: number, to: number, suffix: string): string[] {
+  const first = dayStamp(from);
+  const last = dayStamp(to);
+  return names.filter((f) => {
+    const m = FILE_RE.exec(f);
+    return m !== null && (m[2] ?? '') === suffix && m[1] >= first && m[1] <= last;
+  });
+}
+
+function parseInto<T extends { t: number }>(text: string, from: number, to: number, out: T[]): void {
+  for (const line of text.split('\n')) {
+    if (!line) continue;
+    try {
+      const x = JSON.parse(line) as T;
+      if (typeof x.t === 'number' && x.t >= from && x.t <= to) out.push(x);
+    } catch {
+      // a half-written last line from a crash; skip it
+    }
+  }
+}
+
+// Every record of one kind with from <= t <= to, oldest first. For startup, which loads a day.
 export function loadRange<T extends { t: number }>(dir: string, from: number, to: number, suffix = ''): T[] {
   let names: string[];
   try {
@@ -36,27 +59,32 @@ export function loadRange<T extends { t: number }>(dir: string, from: number, to
   } catch {
     return [];
   }
-  // Pick files by the date in their name, so a DST change can't skip a day.
-  const first = dayStamp(from);
-  const last = dayStamp(to);
   const loaded: T[] = [];
-  for (const f of names) {
-    const m = FILE_RE.exec(f);
-    if (!m || (m[2] ?? '') !== suffix || m[1] < first || m[1] > last) continue;
-    let text: string;
+  for (const f of filesFor(names, from, to, suffix)) {
     try {
-      text = fs.readFileSync(path.join(dir, f), 'utf8');
+      parseInto(fs.readFileSync(path.join(dir, f), 'utf8'), from, to, loaded);
     } catch {
-      continue;
+      // gone since the listing; skip it
     }
-    for (const line of text.split('\n')) {
-      if (!line) continue;
-      try {
-        const x = JSON.parse(line) as T;
-        if (typeof x.t === 'number' && x.t >= from && x.t <= to) loaded.push(x);
-      } catch {
-        // a half-written last line from a crash; skip it
-      }
+  }
+  return loaded.sort((a, b) => a.t - b.t);
+}
+
+// The same, reading one file at a time without blocking, for reports over many days
+// while the checks keep running.
+export async function loadRangeAsync<T extends { t: number }>(dir: string, from: number, to: number, suffix = ''): Promise<T[]> {
+  let names: string[];
+  try {
+    names = await fs.promises.readdir(dir);
+  } catch {
+    return [];
+  }
+  const loaded: T[] = [];
+  for (const f of filesFor(names, from, to, suffix)) {
+    try {
+      parseInto(await fs.promises.readFile(path.join(dir, f), 'utf8'), from, to, loaded);
+    } catch {
+      // gone since the listing; skip it
     }
   }
   return loaded.sort((a, b) => a.t - b.t);

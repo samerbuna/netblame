@@ -16,7 +16,7 @@ const source = {
   watching(n: number) {
     viewers = n;
   },
-  report: (days: number) => `report for ${days} days\n`,
+  report: async (days: number) => `report for ${days} days\n`,
   speedTests: 0,
   speedTest() {
     return this.speedTests++ ? 'running' as const : 'started' as const;

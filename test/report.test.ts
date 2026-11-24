@@ -53,6 +53,6 @@ test('fmtSpan: days for long spans', () => {
 test('reportFromDisk: reads the history files', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'is-it-me-report-'));
   for (const x of hour()) await persist(dir, x);
-  const text = reportFromDisk(loadConfig({ DATA_DIR: dir }), 1, NOW);
+  const text = await reportFromDisk(loadConfig({ DATA_DIR: dir }), 1, NOW);
   assert.match(text, /Outages: {4}1, 5m 00s offline in total/);
 });
