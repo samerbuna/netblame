@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Is it me?</title>
+<link rel="icon" id="favicon" href="data:,">
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<main>
+  <section class="card" id="hero" data-status="idle" aria-live="polite">
+    <div class="hero">
+      <div class="orb" id="orb" aria-hidden="true">…</div>
+      <div class="hero-text">
+        <p class="hero-label" id="label">Connecting…</p>
+        <div class="hero-reason" id="reason">Waiting for the local monitor</div>
+        <div class="hero-since" id="since"></div>
+      </div>
+    </div>
+    <div class="layers-title">Network</div>
+    <div class="layers">
+      <div class="layer" id="layer-router">
+        <div class="layer-name"><span class="dot"></span>Router</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-internet">
+        <div class="layer-name"><span class="dot"></span>Internet ping</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-dns">
+        <div class="layer-name"><span class="dot"></span>DNS</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-web">
+        <div class="layer-name"><span class="dot"></span>Web (HTTP)</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+    </div>
+    <div class="layers-title">This machine</div>
+    <div class="layers">
+      <div class="layer" id="layer-cpu">
+        <div class="layer-name"><span class="dot"></span>CPU</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-mem">
+        <div class="layer-name"><span class="dot"></span>Memory</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-disk">
+        <div class="layer-name"><span class="dot"></span>Disk</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+      <div class="layer" id="layer-swap">
+        <div class="layer-name"><span class="dot"></span>Swap</div>
+        <div class="layer-value">—</div><div class="layer-sub"></div>
+      </div>
+    </div>
+    <div class="machine-note" id="machine-note"></div>
+  </section>
+
+  <div class="filters" role="group" aria-label="Time range">
+    <button type="button" data-range="900000">15 min</button>
+    <button type="button" data-range="3600000">1 hour</button>
+    <button type="button" data-range="21600000">6 hours</button>
+    <button type="button" data-range="86400000">24 hours</button>
+  </div>
+
+  <div class="tiles">
+    <div class="card"><div class="tile-label">Uptime</div><div class="tile-value" id="t-uptime">—</div><div class="tile-sub" id="t-uptime-sub"></div></div>
+    <div class="card"><div class="tile-label">Outages</div><div class="tile-value" id="t-outages">—</div><div class="tile-sub" id="t-outages-sub"></div></div>
+    <div class="card"><div class="tile-label">Internet latency (median)</div><div class="tile-value" id="t-latency">—</div><div class="tile-sub" id="t-latency-sub"></div></div>
+    <div class="card"><div class="tile-label">Ping loss</div><div class="tile-value" id="t-loss">—</div><div class="tile-sub" id="t-loss-sub"></div></div>
+  </div>
+
+  <section class="card">
+    <div class="chart-head">
+      <h2>Round-trip time (ms)</h2>
+      <div class="legend">
+        <span><i class="key-line" style="background:var(--series-1)"></i><span id="legend-internet">Internet</span></span>
+        <span><i class="key-line" style="background:var(--series-2)"></i><span id="legend-router">Router</span></span>
+        <span><i class="key-band" style="background:color-mix(in srgb, var(--critical) 25%, transparent)"></i>Offline</span>
+        <span><i class="key-band" style="background:color-mix(in srgb, var(--warning) 30%, transparent)"></i>Degraded</span>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg id="chart" class="chart" role="img" aria-label="Round-trip time over the selected range"></svg>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+  </section>
+
+  <section class="card section">
+    <h2>Outages, last 24 hours</h2>
+    <div id="outages"></div>
+  </section>
+
+  <section class="card section">
+    <div class="chart-head">
+      <h2>This machine: CPU and memory (%)</h2>
+      <div class="legend">
+        <span><i class="key-line" style="background:var(--series-1)"></i>CPU</span>
+        <span><i class="key-line" style="background:var(--series-2)"></i>Memory in use</span>
+        <span><i class="key-band" style="background:color-mix(in srgb, var(--warning) 30%, transparent)"></i>Degraded</span>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg id="chart-load" class="chart small" role="img" aria-label="CPU and memory use over the selected range"></svg>
+      <div class="tooltip" id="tooltip-load"></div>
+    </div>
+    <div class="chart-head machine-head">
+      <h2>Network throughput (per second)</h2>
+      <div class="legend">
+        <span><i class="key-line" style="background:var(--series-1)"></i>Received</span>
+        <span><i class="key-line" style="background:var(--series-2)"></i>Sent</span>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg id="chart-net" class="chart small" role="img" aria-label="Network throughput over the selected range"></svg>
+      <div class="tooltip" id="tooltip-net"></div>
+    </div>
+    <h2 class="machine-head">Top processes, now</h2>
+    <div id="procs"></div>
+  </section>
+
+  <section class="card section">
+    <details>
+      <summary>Latest checks</summary>
+      <div class="table-scroll" id="recent"></div>
+    </details>
+  </section>
+
+  <footer id="footer"></footer>
+</main>
+</body>
+</html>

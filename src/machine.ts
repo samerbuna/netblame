@@ -5,7 +5,7 @@
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { run, readText } from './exec.ts';
 
 // Thresholds for calling the machine degraded.
 export const LIMITS = {
@@ -50,27 +50,8 @@ export type Reading = Omit<MachineSample, 't' | 's' | 'r' | 'w'>;
 export interface Proc { pid: number; name: string; cpu: number | null; mb: number }
 export interface Procs { cpu: Proc[]; mem: Proc[] }
 
-// A localized command can print "12,3" or translated labels that the parsers would miss.
-export const C_ENV = { ...process.env, LC_ALL: 'C' };
-
 const isMac = process.platform === 'darwin';
 const round = (x: number, places = 1) => Math.round(x * 10 ** places) / 10 ** places;
-
-function run(cmd: string, args: string[]): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 3000, env: C_ENV, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? null : stdout);
-    });
-  });
-}
-
-async function readText(file: string): Promise<string | null> {
-  try {
-    return await fs.promises.readFile(file, 'utf8');
-  } catch {
-    return null;
-  }
-}
 
 // "MemAvailable:  1234 kB" style files (/proc/meminfo, /proc/vmstat).
 function field(text: string | null, name: string): number | null {

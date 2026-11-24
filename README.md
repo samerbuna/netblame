@@ -3,11 +3,10 @@
 A local page that shows whether this machine can reach the internet, and why not when it can't. It also watches the machine itself, since a full disk or a maxed-out CPU can feel like a bad connection.
 
 ```zsh
-node monitor.ts        # or: npm start
-open http://localhost:4321
+npm start              # or: node src/cli.ts
 ```
 
-Needs Node 22.18 or later in the 22 line, or 23.6 or newer, which run the `.ts` file directly. There are no dependencies. Works on macOS and Linux.
+It opens http://localhost:4321. Needs Node 22.18 or later in the 22 line, or 23.6 or newer, which run the `.ts` files directly. There are no dependencies. Works on macOS and Linux.
 
 ## What it checks
 
@@ -40,13 +39,13 @@ The page also lists the processes using the most CPU and memory. That list is co
 
 ## Data
 
-Each round is appended as one JSON line to `data/YYYY-MM-DD.jsonl`, and each machine health sample to `data/YYYY-MM-DD.machine.jsonl`. Together they take about 2.5 MB a day. Files older than 7 days are deleted. The page loads the last 24 hours when it connects.
+History lives in `~/Library/Application Support/is-it-me` on macOS and `~/.local/state/is-it-me` on Linux (or `$XDG_STATE_HOME/is-it-me`). Each round is appended as one JSON line to `YYYY-MM-DD.jsonl` there, and each machine health sample to `YYYY-MM-DD.machine.jsonl`. Together they take about 2.5 MB a day. Files older than 7 days are deleted. The page loads the last 24 hours when it connects.
 
 The server only listens on 127.0.0.1 and refuses requests whose Host header isn't `localhost` or `127.0.0.1`.
 
 ## Settings
 
-Set these as environment variables, for example `PORT=4322 node monitor.ts`.
+Set these as environment variables, for example `PORT=4322 npm start`.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -58,5 +57,6 @@ Set these as environment variables, for example `PORT=4322 node monitor.ts`.
 | `KEEP_DAYS` | `7` | days of history files to keep |
 | `MACHINE_MS` | `10000` | time between machine health samples |
 | `DISK_PATH` | `/` | free space is watched on the volume holding this path |
+| `DATA_DIR` | see Data | where history files go |
 
-It only monitors while `monitor.ts` is running. Gaps when it was stopped or the machine slept show as breaks in the chart and don't count as outages.
+It only monitors while it's running. Gaps when it was stopped or the machine slept show as breaks in the chart and don't count as outages.
