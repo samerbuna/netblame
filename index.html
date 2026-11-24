@@ -367,29 +367,40 @@
     return last;
   }
 
-  // What the hero shows. Offline and "not running" are about the network only;
-  // a machine warning turns an otherwise healthy status Degraded.
+  // What the hero shows for a network status and a machine status (undefined when unknown).
+  // Offline is about the network only; a machine warning turns an otherwise healthy status Degraded.
+  function heroAt(net, mach) {
+    if (net === 'down') return 'down';
+    return mach === 'warn' ? 'warn' : net;
+  }
+
   function heroStatus() {
     const net = currentStatus();
-    if (net === 'idle' || net === 'down') return net;
-    return currentMachine()?.s === 'warn' ? 'warn' : net;
+    if (net === 'idle') return net;
+    return heroAt(net, currentMachine()?.s);
   }
 
-  // How long a series' current status has held, without crossing a gap in the record.
-  function runStart(list, gapMs) {
-    let i = list.length - 1;
-    if (i < 0) return null;
-    const s = list[i].s;
-    while (i > 0 && list[i - 1].s === s && list[i].t - list[i - 1].t <= gapMs) i--;
-    return list[i].t;
-  }
-
-  // The hero's status changes whenever either the network's or the machine's does.
+  // How long the hero's status has held. Walks back through both records together: each pair
+  // (network sample i, machine sample j) holds from the later of the two, so step past whichever
+  // is newer, and stop at the first pair that shows a different status or at a gap in the network record.
   function statusSince() {
-    const net = runStart(samples, config.gapMs);
-    const mach = currentMachine() ? runStart(machine, config.machineGapMs) : null;
-    if (net === null) return mach;
-    return mach === null ? net : Math.max(net, mach);
+    const status = heroStatus();
+    let i = samples.length - 1;
+    if (status === 'idle' || i < 0) return null;
+    let j = currentMachine() ? machine.length - 1 : -1;
+    let since = null;
+    for (;;) {
+      const m = j >= 0 ? machine[j] : null;
+      if (heroAt(samples[i].s, m?.s) !== status) return since;
+      since = Math.max(samples[i].t, m ? m.t : -Infinity);
+      if (m && m.t >= samples[i].t) {
+        // Before a gap in the machine record its status is unknown, so only the network counts there.
+        j = j > 0 && m.t - machine[j - 1].t <= config.machineGapMs ? j - 1 : -1;
+      } else {
+        if (i === 0 || samples[i].t - samples[i - 1].t > config.gapMs) return since;
+        i--;
+      }
+    }
   }
 
   // When the time sample i stands for ends: at the next sample, one tick later if the
