@@ -91,9 +91,14 @@ export function createCollector(diskPath: string, intervalMs: number) {
   let prevNet: { iface: string; rx: number; tx: number } | null = null;
   let slowAt = 0;
   let slow: Pick<Reading, 'bat' | 'ac' | 'hot'> = {};
-  let pageSize: number | null = isMac ? null : 4096;
-  let prevProcTimes = new Map<number, number>(); // Linux: pid -> CPU seconds, for per-process rates
+  let pageSize: number | null = null;
+  let prevProcTicks = new Map<number, number>(); // Linux: pid -> CPU clock ticks, for per-process rates
   let prevProcAt = 0;
+
+  // Linux clock ticks per second and page size, read once.
+  let linuxSys: Promise<{ hz: number; page: number }> | null = null;
+  const sysconf = () => (linuxSys ??= Promise.all([run('getconf', ['CLK_TCK']), run('getconf', ['PAGESIZE'])])
+    .then(([hz, page]) => ({ hz: Number(hz) || 100, page: Number(page) || 4096 })));
 
   function cpuTimes() {
     let idle = 0;
@@ -123,7 +128,8 @@ export function createCollector(diskPath: string, intervalMs: number) {
         swapOut: outs && pageSize ? Number(outs[1]) * pageSize : null,
       };
     }
-    const [info, vmstat] = await Promise.all([readText('/proc/meminfo'), readText('/proc/vmstat')]);
+    const [info, vmstat, sys] = await Promise.all([readText('/proc/meminfo'), readText('/proc/vmstat'), sysconf()]);
+    pageSize = sys.page;
     const total = field(info, 'MemTotal');
     const avail = field(info, 'MemAvailable');
     const swapTotal = field(info, 'SwapTotal');
@@ -246,39 +252,71 @@ export function createCollector(diskPath: string, intervalMs: number) {
     return { cpu, load: round(os.loadavg()[0], 2), mem: m.mem, swap: m.swap, so, ...d, rx, tx, ...slow };
   }
 
-  // Top processes by CPU and by memory. macOS ps reports recent CPU use; Linux ps reports
-  // a lifetime average, so there the rate comes from CPU seconds between two calls.
-  async function procs(now: number): Promise<Procs | null> {
-    const out = await run('ps', isMac ? ['-Ao', 'pid=,pcpu=,rss=,comm='] : ['-eo', 'pid=,times=,rss=,comm=']);
+  // macOS ps reports recent CPU use per process.
+  async function macProcs(): Promise<Proc[] | null> {
+    const out = await run('ps', ['-Ao', 'pid=,pcpu=,rss=,comm=']);
     if (!out) return null;
     const list: Proc[] = [];
-    const times = new Map<number, number>();
-    const dt = (now - prevProcAt) / 1000;
-    const haveRates = prevProcAt > 0 && now - prevProcAt <= maxGapMs;
     for (const line of out.split('\n')) {
       const m = /^\s*(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/.exec(line);
-      if (!m) continue;
-      const pid = Number(m[1]);
-      let cpu: number | null;
-      if (isMac) cpu = Number(m[2]);
-      else {
-        const secs = Number(m[2]);
-        times.set(pid, secs);
-        const before = prevProcTimes.get(pid);
-        cpu = haveRates && before !== undefined && secs >= before ? round((100 * (secs - before)) / dt) : null;
-      }
-      list.push({ pid, name: path.basename(m[4].trim()), cpu, mb: round(Number(m[3]) / 1024) });
+      if (m) list.push({ pid: Number(m[1]), name: path.basename(m[4].trim()), cpu: Number(m[2]), mb: round(Number(m[3]) / 1024) });
     }
-    if (!isMac) {
-      prevProcTimes = times;
-      prevProcAt = now;
+    return list;
+  }
+
+  // Linux ps reports a lifetime average and counts CPU time in whole seconds, so the rate comes
+  // from /proc/<pid>/stat clock ticks between two calls.
+  async function linuxProcs(now: number): Promise<Proc[] | null> {
+    const { hz, page } = await sysconf();
+    let pids: string[];
+    try {
+      pids = (await fs.promises.readdir('/proc')).filter((d) => /^\d+$/.test(d));
+    } catch {
+      return null;
     }
+    const stats = await Promise.all(pids.map((p) => readText(`/proc/${p}/stat`)));
+    const dt = (now - prevProcAt) / 1000;
+    const haveRates = prevProcAt > 0 && now - prevProcAt <= maxGapMs;
+    const ticks = new Map<number, number>();
+    const list: Proc[] = [];
+    for (const text of stats) {
+      const st = text ? parseProcStat(text) : null; // null text: the process exited meanwhile
+      if (!st) continue;
+      ticks.set(st.pid, st.ticks);
+      const before = prevProcTicks.get(st.pid);
+      const cpu = haveRates && before !== undefined && st.ticks >= before ? round((100 * (st.ticks - before)) / hz / dt) : null;
+      list.push({ pid: st.pid, name: st.name, cpu, mb: round((st.rssPages * page) / 1048576) });
+    }
+    prevProcTicks = ticks;
+    prevProcAt = now;
+    return list;
+  }
+
+  // Top processes by CPU and by memory.
+  async function procs(now: number): Promise<Procs | null> {
+    const list = isMac ? await macProcs() : await linuxProcs(now);
+    if (!list) return null;
     const byCpu = list.filter((p) => p.cpu !== null).sort((a, b) => b.cpu! - a.cpu!).slice(0, 5);
     const byMem = [...list].sort((a, b) => b.mb - a.mb).slice(0, 5);
     return { cpu: byCpu, mem: byMem };
   }
 
   return { sample, procs };
+}
+
+// One /proc/<pid>/stat line (see proc(5)). The name sits in parentheses and may itself contain
+// spaces or ")", so fields are counted from the last ")": utime and stime are fields 14 and 15,
+// rss (in pages) is field 24.
+export function parseProcStat(text: string): { pid: number; name: string; ticks: number; rssPages: number } | null {
+  const open = text.indexOf('(');
+  const close = text.lastIndexOf(')');
+  if (open < 0 || close < open) return null;
+  const f = text.slice(close + 2).split(' ');
+  const pid = Number(text.slice(0, open));
+  const ticks = Number(f[11]) + Number(f[12]);
+  const rssPages = Number(f[21]);
+  if (!Number.isFinite(pid) || !Number.isFinite(ticks) || !Number.isFinite(rssPages)) return null;
+  return { pid, name: text.slice(open + 1, close), ticks, rssPages };
 }
 
 // ---------- status ----------
