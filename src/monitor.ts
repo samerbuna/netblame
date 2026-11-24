@@ -13,6 +13,7 @@ import { createCollector, machineStatus } from './machine.ts';
 import type { MachineSample, Procs } from './machine.ts';
 import { persist, loadRange, dropOlderThan, pruneOldFiles, MACHINE, EVENTS } from './history.ts';
 import { createNotifier, sendNote } from './notify.ts';
+import { reportFromDisk } from './report.ts';
 import type { Note } from './notify.ts';
 
 const GATEWAY_REFRESH_MS = 30_000;
@@ -239,9 +240,12 @@ export function createMonitor(cfg: Config, send: (note: Note) => void = sendNote
     init(): Snapshot {
       const config = {
         tickMs: cfg.tickMs, gapMs: cfg.gapMs, pingHost: cfg.pingHost, httpUrl: cfg.httpUrl, httpEveryMs: cfg.httpEveryMs,
-        machineMs: cfg.machineMs, machineGapMs: cfg.machineGapMs, diskPath: cfg.diskPath,
+        machineMs: cfg.machineMs, machineGapMs: cfg.machineGapMs, diskPath: cfg.diskPath, keepDays: cfg.keepDays,
       };
       return { config, ...link(), samples, events, machine: { samples: machineSamples, procs } };
+    },
+    report(days: number): string {
+      return reportFromDisk(cfg, days);
     },
     subscribe(fn: Listener): () => void {
       listeners.add(fn);

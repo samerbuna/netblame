@@ -599,6 +599,25 @@ function renderRecent() {
 }
 $('recent').closest('details').addEventListener('toggle', renderRecent);
 
+// The report covers every day of history kept (KEEP_DAYS), read from disk by the server.
+async function copyReport() {
+  const button = $('copy-report');
+  const label = button.textContent;
+  try {
+    const res = await fetch(`/report?days=${config.keepDays ?? 7}`);
+    if (!res.ok) throw new Error(String(res.status));
+    await navigator.clipboard.writeText(await res.text());
+    button.textContent = 'Copied';
+  } catch {
+    // No clipboard access (or the monitor is down): show the report instead.
+    window.open($('view-report').href, '_blank');
+    button.textContent = 'Opened instead';
+  }
+  button.disabled = true;
+  setTimeout(() => { button.textContent = label; button.disabled = false; }, 2000);
+}
+$('copy-report').addEventListener('click', copyReport);
+
 // ---------- wiring ----------
 
 function procTable(title, list, value) {
@@ -689,6 +708,8 @@ function connect() {
   es.addEventListener('init', (e) => {
     const data = JSON.parse(e.data);
     config = { ...config, ...data.config };
+    $('view-report').href = `/report?days=${config.keepDays}`;
+    $('copy-report').textContent = `Copy ${config.keepDays}-day report for your ISP`;
     setLink(data);
     samples = data.samples;
     events = data.events ?? [];

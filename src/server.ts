@@ -14,6 +14,7 @@ export interface Source {
   init(): Record<string, unknown>;
   subscribe(fn: (event: string, data: unknown) => void): () => void;
   watching(n: number): void;
+  report(days: number): string; // plain-text outage report
 }
 
 const TYPES: Record<string, string> = {
@@ -65,6 +66,12 @@ export function createServer(source: Source, publicDir: string): http.Server {
         }
         res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)], 'Cache-Control': 'no-store' }).end(body);
       });
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/report') {
+      const days = Math.min(31, Math.max(1, Math.round(Number(url.searchParams.get('days')) || 7)));
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }).end(source.report(days));
       return;
     }
 

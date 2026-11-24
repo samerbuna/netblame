@@ -6,12 +6,15 @@ import { loadConfig, VERSION, APP, PUBLIC_DIR } from './config.ts';
 import type { Config } from './config.ts';
 import { createMonitor } from './monitor.ts';
 import { createServer } from './server.ts';
+import { reportFromDisk } from './report.ts';
 
 const HELP = `${APP} ${VERSION}: is it me, or the internet?
 
 Usage:
   ${APP}            start monitoring and open the page (or just open it, if already running)
   ${APP} run        start monitoring without opening the page
+  ${APP} report [--days N]
+                   print an outage report for the last N days (default 7), for your ISP
   ${APP} --version
   ${APP} --help
 
@@ -73,6 +76,17 @@ async function main(args: string[]): Promise<void> {
       return start(cfg, true);
     case 'run':
       return start(cfg, false);
+    case 'report': {
+      const i = args.indexOf('--days');
+      const days = i > 0 ? Number(args[i + 1]) : cfg.keepDays;
+      if (!Number.isFinite(days) || days <= 0) {
+        console.error('--days needs a number of days, for example: report --days 3');
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write(reportFromDisk(cfg, days));
+      return;
+    }
     case '-v':
     case '--version':
       console.log(VERSION);

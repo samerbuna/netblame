@@ -36,6 +36,8 @@ test('build: every source file becomes plain JS with .js imports', () => {
   const pkgJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(runBuilt(pkg, ['--version']).trim(), pkgJson.version);
   assert.match(runBuilt(pkg, ['--help']), /Usage:/);
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'is-it-me-empty-'));
+  assert.match(runBuilt(pkg, ['report', '--days', '1'], { DATA_DIR: empty }), /No checks were recorded/);
 });
 
 test('build: refuses an output folder not named dist', () => {

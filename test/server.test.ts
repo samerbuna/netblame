@@ -16,6 +16,7 @@ const source = {
   watching(n: number) {
     viewers = n;
   },
+  report: (days: number) => `report for ${days} days\n`,
 };
 
 const server = createServer(source, PUBLIC_DIR);
@@ -82,4 +83,14 @@ test('events: init first, then what the monitor emits, and counts viewers', asyn
   req.destroy();
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(viewers, 0);
+});
+
+test('report: plain text, days clamped to 1-31', async () => {
+  const r = await get('/report?days=3');
+  assert.equal(r.status, 200);
+  assert.match(r.type, /text\/plain/);
+  assert.equal(r.body, 'report for 3 days\n');
+  assert.equal((await get('/report?days=400')).body, 'report for 31 days\n');
+  assert.equal((await get('/report?days=abc')).body, 'report for 7 days\n');
+  assert.equal((await get('/report')).body, 'report for 7 days\n');
 });
