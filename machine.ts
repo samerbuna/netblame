@@ -212,13 +212,20 @@ export function createCollector(diskPath: string, intervalMs: number) {
     }
     prevCpu = cpuNow;
 
-    if (now - slowAt >= SLOW_EVERY_MS) {
-      const [b, h] = await Promise.all([battery(), thermal()]);
+    // Everything is read at once. Reading battery and thermal (pmset can take up to its timeout)
+    // before the counters would delay them past `now`, so their rates would cover the wrong span.
+    const slowDue = now - slowAt >= SLOW_EVERY_MS;
+    const [m, d, net, b, h] = await Promise.all([
+      memory(),
+      disk(),
+      iface ? netCounters(iface) : Promise.resolve(null),
+      slowDue ? battery() : Promise.resolve(null),
+      slowDue ? thermal() : Promise.resolve(null),
+    ]);
+    if (slowDue) {
       slow = { ...b, ...h };
       slowAt = now;
     }
-
-    const [m, d, net] = await Promise.all([memory(), disk(), iface ? netCounters(iface) : Promise.resolve(null)]);
 
     // A counter that went down was reset (interface restarted); skip that sample's rate.
     let so: number | null = null;
