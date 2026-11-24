@@ -666,7 +666,8 @@
   //   yMax(max): the top of the y scale for the largest bucket value
   //   footer(b): optional [value, name] row under the series in the tooltip
   //   bands: false to leave out the status bands
-  function makeChart({ svg, tip, list, stepMs, series, yMax: scale, yLabel, left = 40, footer, bands = true }) {
+  //   statusOf(x): the status a sample counts as for bands and the tooltip, x.s by default
+  function makeChart({ svg, tip, list, stepMs, series, yMax: scale, yLabel, left = 40, footer, bands = true, statusOf = (x) => x.s }) {
     let buckets = [];
     let geom = null;
     let hoverIndex = null;
@@ -693,7 +694,8 @@
           b.sum[s.key] = (b.sum[s.key] || 0) + v;
           b.num[s.key] = (b.num[s.key] || 0) + 1;
         }
-        if (b.worst === null || STATUS_RANK[x.s] > STATUS_RANK[b.worst]) b.worst = x.s;
+        const st = statusOf(x);
+        if (b.worst === null || STATUS_RANK[st] > STATUS_RANK[b.worst]) b.worst = st;
       }
       let max = 0;
       for (const b of buckets) {
@@ -842,7 +844,11 @@
     footer: (b) => [LABELS[b.worst], b.miss.n ? `${b.miss.n} of ${b.cnt} pings lost` : `${b.cnt} check${b.cnt === 1 ? '' : 's'}`],
   });
 
-  const machineFooter = (b) => (b.worst === 'warn' ? ['Degraded', '(machine)'] : null);
+  // Shade this chart only for warnings about what it plots: a full disk or low battery
+  // would otherwise shade it while CPU and memory are fine.
+  const LOAD_KEYS = ['cpu', 'mem', 'swap'];
+  const loadStatus = (x) => (x.w?.some((k) => LOAD_KEYS.includes(k)) ? 'warn' : 'up');
+  const machineFooter = (b) => (b.worst === 'warn' ? ['Degraded', '(CPU, memory or swap)'] : null);
 
   const loadChart = makeChart({
     svg: $('chart-load'),
@@ -856,6 +862,7 @@
     yMax: () => 100,
     yLabel: (v) => String(Math.round(v)),
     footer: machineFooter,
+    statusOf: loadStatus,
   });
 
   const netChart = makeChart({
