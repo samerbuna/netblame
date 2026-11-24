@@ -94,6 +94,15 @@ const quietly = (cmd: string, args: string[]) => {
 };
 const guiDomain = () => `gui/${process.getuid?.() ?? 0}`;
 
+// Starts the service from its definition file.
+function startService(file: string): void {
+  if (process.platform === 'darwin') sh('launchctl', ['bootstrap', guiDomain(), file]);
+  else {
+    sh('systemctl', ['--user', 'daemon-reload']);
+    sh('systemctl', ['--user', 'enable', '--now', `${LABEL}.service`]);
+  }
+}
+
 // Stops the service if it's running. Returns whether its definition file existed.
 function stopService(): boolean {
   const file = servicePath();
@@ -117,9 +126,21 @@ function copyApp(dir: string): string {
 
 export async function install(cfg: Config, portFree: () => Promise<boolean>): Promise<void> {
   if (process.platform !== 'darwin' && process.platform !== 'linux') throw new Error('Start at login works on macOS and Linux only.');
-  stopService(); // an earlier install, so its port is free and its files can be replaced
+  // Stop an earlier install, so its port is free and its files can be replaced.
+  const file = servicePath();
+  const existed = stopService();
   if (!(await portFree())) {
-    throw new Error(`Port ${cfg.port} is in use, probably by is-it-me running in a terminal. Stop that (Ctrl-C) and run install again, or pick another port: PORT=${cfg.port + 1} ${APP} install`);
+    // Something else holds the port. Leave things as they were: start the earlier install again.
+    let restored = '';
+    if (existed) {
+      try {
+        startService(file);
+        restored = ' The service that was already installed is running again, unchanged.';
+      } catch {
+        restored = ` The service that was already installed is stopped; run install again once the port is free.`;
+      }
+    }
+    throw new Error(`Port ${cfg.port} is in use, probably by is-it-me running in a terminal. Stop that (Ctrl-C) and run install again, or pick another port: PORT=${cfg.port + 1} ${APP} install.${restored}`);
   }
 
   fs.mkdirSync(cfg.dataDir, { recursive: true });
@@ -129,16 +150,9 @@ export async function install(cfg: Config, portFree: () => Promise<boolean>): Pr
     env: serviceEnv(cfg),
     log: path.join(cfg.dataDir, `${APP}.log`),
   };
-  const file = servicePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (process.platform === 'darwin') {
-    fs.writeFileSync(file, launchdPlist(spec));
-    sh('launchctl', ['bootstrap', guiDomain(), file]);
-  } else {
-    fs.writeFileSync(file, systemdUnit(spec));
-    sh('systemctl', ['--user', 'daemon-reload']);
-    sh('systemctl', ['--user', 'enable', '--now', `${LABEL}.service`]);
-  }
+  fs.writeFileSync(file, process.platform === 'darwin' ? launchdPlist(spec) : systemdUnit(spec));
+  startService(file);
   console.log(`${APP} now starts at login and is running on http://localhost:${cfg.port}
   service: ${file}
   app:     ${path.dirname(path.dirname(spec.cli))}
