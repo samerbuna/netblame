@@ -2,6 +2,13 @@
   "name": "is-it-me",
   "version": "0.1.0",
   "description": "Is it me, or the internet? A local page that says whether your Wi-Fi, router, ISP, DNS or this machine is the problem.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samerbuna/is-it-me.git"
+  },
+  "homepage": "https://github.com/samerbuna/is-it-me#readme",
+  "bugs": "https://github.com/samerbuna/is-it-me/issues",
   "keywords": [
     "network",
     "monitor",

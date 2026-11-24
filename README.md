@@ -136,3 +136,7 @@ The server listens on 127.0.0.1 only and refuses requests whose Host header isn'
 `src/` is the TypeScript server: checks, rules, history, notifications, the login service, the web server. `public/` is the page. The status logic in `public/lib` is shared by the page, the report and the tests. The build uses Node's own type stripper, because Node won't strip types from `.ts` files inside `node_modules`.
 
 Linux support is written against the documented formats of `/proc`, `/sys` and `ip`, but hasn't been tested on a Linux machine yet.
+
+## License
+
+MIT
