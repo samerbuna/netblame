@@ -11,6 +11,8 @@ import { Resolver } from 'node:dns/promises';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createCollector, machineStatus, C_ENV, WINDOW_MS } from './machine.ts';
+import type { MachineSample, Procs } from './machine.ts';
 
 function envNum(name: string, fallback: number): number {
   const v = Number(process.env[name]);
@@ -24,6 +26,8 @@ const PING_HOST = process.env.PING_HOST ?? '1.1.1.1';
 const HTTP_URL = process.env.HTTP_URL ?? 'http://cp.cloudflare.com/generate_204';
 // Each DNS check asks for a random name under this zone, so no cache can answer it.
 const DNS_ZONE = process.env.DNS_ZONE ?? 'example.com';
+const MACHINE_MS = envNum('MACHINE_MS', 10_000); // time between machine health samples
+const DISK_PATH = process.env.DISK_PATH ?? '/';  // free space is watched on the volume holding this path
 
 const HTTP_EVERY_MS = 30_000;          // routine web check; it also runs whenever another check fails
 const GATEWAY_REFRESH_MS = 30_000;
@@ -34,6 +38,7 @@ const GAP_MS = TICK_MS * 2 + 10_000;
 const SLEEP_SLACK_MS = 5000;            // the wait between rounds overran by this much: the machine slept
 const RESUME_GRACE_MS = 20_000;         // Wi-Fi takes a few seconds to rejoin after sleep; don't call that an outage
 const DOWN_AFTER = 2;                   // consecutive failed ticks before we say "down"
+const MACHINE_GAP_MS = MACHINE_MS * 2 + 10_000;
 
 const HERE = import.meta.dirname;
 const DATA_DIR = path.join(HERE, 'data');
@@ -62,9 +67,8 @@ function ping(host: string, timeoutMs: number): Promise<Ms> {
   // -W is milliseconds on macOS, whole seconds on Linux.
   const wait = process.platform === 'darwin' ? String(timeoutMs) : String(Math.max(1, Math.ceil(timeoutMs / 1000)));
   return new Promise((resolve) => {
-    // LC_ALL=C: a localized ping (iputils on Linux) can print "Zeit=" or "12,3 ms", which the regex would miss.
-    const env = { ...process.env, LC_ALL: 'C' };
-    execFile('ping', ['-c', '1', '-n', '-W', wait, host], { timeout: timeoutMs + 1000, env }, (err, stdout) => {
+    // C_ENV sets LC_ALL=C: a localized ping (iputils on Linux) can print "Zeit=" or "12,3 ms", which the regex would miss.
+    execFile('ping', ['-c', '1', '-n', '-W', wait, host], { timeout: timeoutMs + 1000, env: C_ENV }, (err, stdout) => {
       if (err) return resolve(null);
       const m = /time[=<]([\d.]+)\s*ms/.exec(stdout);
       resolve(m ? round(Number(m[1])) : null);
@@ -115,30 +119,36 @@ function httpCheck(timeoutMs: number): Promise<HttpResult> {
   });
 }
 
-function firstMatch(cmd: string, args: string[], re: RegExp): Promise<string | null> {
+interface Route { gateway: string; iface: string | null }
+
+// Runs cmd and returns the router address (group 1) and the interface it's reached on (group 2).
+function findRoute(cmd: string, args: string[], re: RegExp): Promise<Route | null> {
   return new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 2000 }, (err, stdout) => {
+    execFile(cmd, args, { timeout: 2000, env: C_ENV }, (err, stdout) => {
       if (err) return resolve(null);
       const m = re.exec(stdout);
-      resolve(m ? m[1] : null);
+      if (!m) return resolve(null);
+      // An interface name starts with a letter; anything else means the columns weren't what we expected.
+      resolve({ gateway: m[1], iface: /^[a-z]/i.test(m[2] ?? '') ? m[2] : null });
     });
   });
 }
 
-async function findGateway(): Promise<string | null> {
+async function findGateway(): Promise<Route | null> {
   if (process.platform !== 'darwin') {
-    return firstMatch('ip', ['-4', 'route', 'show', 'default'], /default via (\d+\.\d+\.\d+\.\d+)/);
+    return findRoute('ip', ['-4', 'route', 'show', 'default'], /default via (\d+\.\d+\.\d+\.\d+)(?: dev (\S+))?/);
   }
   // A VPN that takes over the default route points it at a tunnel interface with no gateway.
   // The physical router's default route is still in the table, scoped to its interface.
-  return await firstMatch('route', ['-n', 'get', 'default'], /gateway:\s*(\d+\.\d+\.\d+\.\d+)/)
-    ?? firstMatch('netstat', ['-rn', '-f', 'inet'], /^default\s+(\d+\.\d+\.\d+\.\d+)\s/m);
+  return await findRoute('route', ['-n', 'get', 'default'], /gateway:\s*(\d+\.\d+\.\d+\.\d+)[\s\S]*?interface:\s*(\S+)/)
+    ?? findRoute('netstat', ['-rn', '-f', 'inet'], /^default\s+(\d+\.\d+\.\d+\.\d+)\s+\S+\s+(\S+)/m);
 }
 
 // ---------- monitor state ----------
 
 let samples: Sample[] = [];
 let gateway: string | null = null;
+let gatewayIface: string | null = null; // where throughput is measured
 let gatewayCheckedAt = 0;
 let lastHttp: HttpResult | null = null;
 let lastHttpAt = 0;
@@ -158,7 +168,9 @@ async function tick(): Promise<void> {
 
   const lastSample = samples.at(-1);
   if (!gateway || now - gatewayCheckedAt > GATEWAY_REFRESH_MS || lastSample?.g === null) {
-    gateway = await findGateway();
+    const route = await findGateway();
+    gateway = route?.gateway ?? null;
+    gatewayIface = route?.iface ?? null;
     gatewayCheckedAt = now;
   }
 
@@ -216,10 +228,7 @@ async function tick(): Promise<void> {
 
   if (s !== lastSample?.s) logChange(sample);
   samples.push(sample);
-  const cutoff = now - HISTORY_MS;
-  let drop = 0;
-  while (drop < samples.length && samples[drop].t < cutoff) drop++;
-  if (drop) samples = samples.slice(drop);
+  samples = dropOlderThan(samples, now - HISTORY_MS);
 
   broadcast('sample', { sample, gateway });
   await persist(sample);
@@ -228,6 +237,46 @@ async function tick(): Promise<void> {
 function logChange(x: Sample): void {
   const label = { up: 'ONLINE ', warn: 'DEGRADED', down: 'OFFLINE' }[x.s];
   console.log(`${new Date(x.t).toLocaleTimeString()}  ${label}  ${x.r ?? ''}`);
+}
+
+// ---------- machine health ----------
+
+const collector = createCollector(DISK_PATH, MACHINE_MS);
+let machineSamples: MachineSample[] = [];
+let procs: Procs | null = null;
+
+async function machineTick(): Promise<void> {
+  const now = Date.now();
+  const [reading, top] = await Promise.all([
+    collector.sample(gatewayIface, now),
+    // Process lists are only for the page, so skip them while nobody is watching.
+    clients.size ? collector.procs(now) : Promise.resolve(null),
+  ]);
+  procs = top;
+
+  const recent = machineSamples.filter((y) => y.t > now - WINDOW_MS);
+  const status = machineStatus([...recent, { t: now, ...reading }]);
+  const sample: MachineSample = { t: now, s: status.s, ...reading };
+  if (status.r) sample.r = status.r;
+
+  if (sample.s !== machineSamples.at(-1)?.s) {
+    console.log(`${new Date(now).toLocaleTimeString()}  ${sample.s === 'up' ? 'MACHINE OK  ' : 'MACHINE WARN'}  ${sample.r ?? ''}`);
+  }
+  machineSamples.push(sample);
+  machineSamples = dropOlderThan(machineSamples, now - HISTORY_MS);
+
+  broadcast('machine', { sample, procs });
+  await persist(sample, MACHINE_SUFFIX);
+}
+
+async function machineLoop(): Promise<void> {
+  const started = Date.now();
+  try {
+    await machineTick();
+  } catch (err) {
+    console.error('machine check failed:', err);
+  }
+  setTimeout(machineLoop, Math.max(0, MACHINE_MS - (Date.now() - started)));
 }
 
 async function loop(): Promise<void> {
@@ -243,26 +292,30 @@ async function loop(): Promise<void> {
 
 // ---------- history on disk: one JSON line per sample, one file per local day ----------
 
-const FILE_RE = /^\d{4}-\d{2}-\d{2}\.jsonl$/;
+// Network samples go to YYYY-MM-DD.jsonl, machine samples to YYYY-MM-DD.machine.jsonl.
+const FILE_RE = /^(\d{4}-\d{2}-\d{2})(\.machine)?\.jsonl$/;
+const MACHINE_SUFFIX = '.machine';
 
-function dayName(t: number): string {
+function dayStamp(t: number): string {
   const d = new Date(t);
   const p = (x: number) => String(x).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.jsonl`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-async function persist(x: Sample): Promise<void> {
+const dayName = (t: number, suffix = '') => `${dayStamp(t)}${suffix}.jsonl`;
+
+async function persist(x: { t: number }, suffix = ''): Promise<void> {
   try {
-    await fs.promises.appendFile(path.join(DATA_DIR, dayName(x.t)), JSON.stringify(x) + '\n');
+    await fs.promises.appendFile(path.join(DATA_DIR, dayName(x.t, suffix)), JSON.stringify(x) + '\n');
   } catch (err) {
     console.error('could not save sample:', (err as Error).message);
   }
 }
 
-function loadHistory(): void {
+function loadHistory<T extends { t: number }>(suffix = ''): T[] {
   const now = Date.now();
-  const files = [...new Set([dayName(now - HISTORY_MS), dayName(now)])];
-  const loaded: Sample[] = [];
+  const files = [...new Set([dayName(now - HISTORY_MS, suffix), dayName(now, suffix)])];
+  const loaded: T[] = [];
   for (const f of files) {
     let text: string;
     try {
@@ -273,21 +326,28 @@ function loadHistory(): void {
     for (const line of text.split('\n')) {
       if (!line) continue;
       try {
-        const x = JSON.parse(line) as Sample;
+        const x = JSON.parse(line) as T;
         if (typeof x.t === 'number' && x.t >= now - HISTORY_MS) loaded.push(x);
       } catch {
         // a half-written last line from a crash; skip it
       }
     }
   }
-  samples = loaded.sort((a, b) => a.t - b.t);
+  return loaded.sort((a, b) => a.t - b.t);
+}
+
+function dropOlderThan<T extends { t: number }>(list: T[], cutoff: number): T[] {
+  let drop = 0;
+  while (drop < list.length && list[drop].t < cutoff) drop++;
+  return drop ? list.slice(drop) : list;
 }
 
 function pruneOldFiles(): void {
-  // Only touches files this script wrote: data/YYYY-MM-DD.jsonl older than KEEP_DAYS.
-  const oldest = dayName(Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000);
+  // Only touches files this script wrote: data/YYYY-MM-DD[.machine].jsonl older than KEEP_DAYS.
+  const oldest = dayStamp(Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000);
   for (const f of fs.readdirSync(DATA_DIR)) {
-    if (FILE_RE.test(f) && f < oldest) {
+    const m = FILE_RE.exec(f);
+    if (m && m[1] < oldest) {
       try {
         fs.unlinkSync(path.join(DATA_DIR, f));
       } catch (err) {
@@ -333,8 +393,12 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       'Cache-Control': 'no-store',
       Connection: 'keep-alive',
     });
-    const config = { tickMs: TICK_MS, gapMs: GAP_MS, pingHost: PING_HOST, httpUrl: HTTP_URL, httpEveryMs: HTTP_EVERY_MS };
-    res.write(`retry: 2000\nevent: init\ndata: ${JSON.stringify({ config, gateway, samples })}\n\n`);
+    const config = {
+      tickMs: TICK_MS, gapMs: GAP_MS, pingHost: PING_HOST, httpUrl: HTTP_URL, httpEveryMs: HTTP_EVERY_MS,
+      machineMs: MACHINE_MS, machineGapMs: MACHINE_GAP_MS, diskPath: DISK_PATH,
+    };
+    const machine = { samples: machineSamples, procs };
+    res.write(`retry: 2000\nevent: init\ndata: ${JSON.stringify({ config, gateway, samples, machine })}\n\n`);
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;
@@ -346,7 +410,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 // ---------- start ----------
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
-loadHistory();
+samples = loadHistory<Sample>();
+machineSamples = loadHistory<MachineSample>(MACHINE_SUFFIX);
 pruneOldFiles();
 setInterval(pruneOldFiles, 60 * 60 * 1000).unref();
 
@@ -359,6 +424,7 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Net monitor on http://localhost:${PORT}  (checks every ${TICK_MS / 1000}s, history in ${DATA_DIR})`);
   loop();
+  machineLoop();
 });
 
 function shutdown(): void {
