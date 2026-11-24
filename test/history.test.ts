@@ -53,4 +53,6 @@ test('loadConfig: defaults, overrides, and nonsense falls back', () => {
   assert.equal(c.dataDir, '/tmp/x');
   assert.equal(c.pingHost, '1.1.1.1');
   assert.equal(c.machineWindowMs, 60_000);
+  // a port listen() would throw on falls back too
+  for (const PORT of ['70000', '4321.5', '0', '-1']) assert.equal(loadConfig({ PORT }).port, 4321, PORT);
 });

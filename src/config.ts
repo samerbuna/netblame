@@ -54,7 +54,7 @@ export function loadConfig(env: Env = process.env): Config {
   const tickMs = envNum(env, 'TICK_MS', 3000);
   const machineMs = envNum(env, 'MACHINE_MS', 10_000);
   return {
-    port: envNum(env, 'PORT', 4321),
+    port: Number.isInteger(Number(env.PORT)) && Number(env.PORT) >= 1 && Number(env.PORT) <= 65535 ? Number(env.PORT) : 4321,
     tickMs,
     keepDays: envNum(env, 'KEEP_DAYS', 7),
     pingHost: env.PING_HOST || '1.1.1.1',
