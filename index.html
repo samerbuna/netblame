@@ -980,16 +980,22 @@
     renderProcs();
   }
 
-  function renderAll() {
+  // Everything that changes with a network sample. Machine charts and processes change only
+  // with a machine sample (every 10s), so they're left to renderMachine().
+  function renderNetwork() {
     renderHero();
     renderTiles();
     rttChart.render();
     renderOutages();
-    renderMachine();
     renderRecent();
     $('legend-internet').textContent = `Internet (${config.pingHost})`;
     $('legend-router').textContent = gateway ? `Router (${gateway})` : 'Router';
     $('footer').textContent = `Checks every ${config.tickMs / 1000}s: ping router and ${config.pingHost}, uncached DNS lookup, and an HTTP 204 check every ${config.httpEveryMs / 1000}s or whenever another check fails. Machine health every ${config.machineMs / 1000}s.`;
+  }
+
+  function renderAll() {
+    renderNetwork();
+    renderMachine();
   }
 
   function setRange(ms) {
@@ -1020,7 +1026,7 @@
       samples.push(data.sample);
       const cutoff = Date.now() - 86400000;
       if (samples.length && samples[0].t < cutoff) samples = samples.filter((x) => x.t >= cutoff);
-      renderAll();
+      renderNetwork();
     });
     es.addEventListener('machine', (e) => {
       const data = JSON.parse(e.data);
