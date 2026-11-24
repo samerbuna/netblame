@@ -119,6 +119,12 @@ h2 { font-size: 13px; font-weight: 600; margin: 0 0 12px; color: var(--ink-2); }
 }
 .small-button:hover { background: color-mix(in srgb, var(--ink) 5%, var(--surface)); }
 .small-button:disabled { cursor: default; opacity: .6; }
+.report-text {
+  display: block; width: 100%; margin-top: 12px; padding: 8px 10px; resize: vertical;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--page); color: var(--ink); border: 1px solid var(--border); border-radius: 8px;
+}
+.report-text[hidden] { display: none; }
 
 /* stat tiles */
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }

@@ -603,18 +603,28 @@ $('recent').closest('details').addEventListener('toggle', renderRecent);
 async function copyReport() {
   const button = $('copy-report');
   const label = button.textContent;
+  button.disabled = true;
+  let text = null;
   try {
     const res = await fetch(`/report?days=${config.keepDays ?? 7}`);
     if (!res.ok) throw new Error(String(res.status));
-    await navigator.clipboard.writeText(await res.text());
+    text = await res.text();
+    // A clipboard write can wait on a permission prompt indefinitely, so give up after a moment.
+    const slow = new Promise((_, reject) => setTimeout(() => reject(new Error('clipboard timeout')), 1500));
+    await Promise.race([navigator.clipboard.writeText(text), slow]);
     button.textContent = 'Copied';
   } catch {
-    // No clipboard access (or the monitor is down): show the report instead.
-    window.open($('view-report').href, '_blank');
-    button.textContent = 'Opened instead';
+    // Without clipboard access, show the report selected, ready to copy by hand.
+    if (text !== null) {
+      const box = $('report-text');
+      box.hidden = false;
+      box.value = text;
+      box.focus();
+      box.select();
+    }
+    button.textContent = text === null ? 'Couldn’t load the report' : 'Shown below, ready to copy';
   }
-  button.disabled = true;
-  setTimeout(() => { button.textContent = label; button.disabled = false; }, 2000);
+  setTimeout(() => { button.textContent = label; button.disabled = false; }, 2500);
 }
 $('copy-report').addEventListener('click', copyReport);
 
