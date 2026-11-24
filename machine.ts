@@ -91,14 +91,23 @@ export function createCollector(diskPath: string, intervalMs: number) {
   let prevNet: { iface: string; rx: number; tx: number } | null = null;
   let slowAt = 0;
   let slow: Pick<Reading, 'bat' | 'ac' | 'hot'> = {};
-  let pageSize: number | null = null;
   let prevProcTicks = new Map<number, number>(); // Linux: pid -> CPU clock ticks, for per-process rates
   let prevProcAt = 0;
 
-  // Linux clock ticks per second and page size, read once.
-  let linuxSys: Promise<{ hz: number; page: number }> | null = null;
-  const sysconf = () => (linuxSys ??= Promise.all([run('getconf', ['CLK_TCK']), run('getconf', ['PAGESIZE'])])
-    .then(([hz, page]) => ({ hz: Number(hz) || 100, page: Number(page) || 4096 })));
+  // Linux clock ticks per second and page size, read once. Without getconf (BusyBox, minimal
+  // containers) the page size comes from /proc/self/smaps, since guessing 4096 would understate
+  // memory 4-16x on 16K and 64K page kernels. If neither works it stays null and the values that
+  // need it aren't reported. Ticks fall back to 100, the USER_HZ of every mainstream architecture.
+  let linuxSys: Promise<{ hz: number; page: number | null }> | null = null;
+  const sysconf = () => (linuxSys ??= (async () => {
+    const [hz, page] = await Promise.all([run('getconf', ['CLK_TCK']), run('getconf', ['PAGESIZE'])]);
+    let pageBytes = Number(page) || null;
+    if (!pageBytes) {
+      const kb = /^KernelPageSize:\s+(\d+) kB/m.exec((await readText('/proc/self/smaps')) ?? '');
+      pageBytes = kb ? Number(kb[1]) * 1024 : null;
+    }
+    return { hz: Number(hz) || 100, page: pageBytes };
+  })());
 
   function cpuTimes() {
     let idle = 0;
@@ -121,15 +130,13 @@ export function createCollector(diskPath: string, intervalMs: number) {
       const used = sys ? /used = ([\d.]+)([MG])/.exec(sys) : null;
       const page = vm ? /page size of (\d+) bytes/.exec(vm) : null;
       const outs = vm ? /^Swapouts:\s+(\d+)/m.exec(vm) : null;
-      if (page) pageSize = Number(page[1]);
       return {
         mem: Number.isFinite(level) && level >= 0 && level <= 100 ? 100 - level : null,
         swap: used ? round(Number(used[1]) * (used[2] === 'G' ? 1024 : 1)) : null,
-        swapOut: outs && pageSize ? Number(outs[1]) * pageSize : null,
+        swapOut: outs && page ? Number(outs[1]) * Number(page[1]) : null,
       };
     }
-    const [info, vmstat, sys] = await Promise.all([readText('/proc/meminfo'), readText('/proc/vmstat'), sysconf()]);
-    pageSize = sys.page;
+    const [info, vmstat, { page }] = await Promise.all([readText('/proc/meminfo'), readText('/proc/vmstat'), sysconf()]);
     const total = field(info, 'MemTotal');
     const avail = field(info, 'MemAvailable');
     const swapTotal = field(info, 'SwapTotal');
@@ -138,7 +145,7 @@ export function createCollector(diskPath: string, intervalMs: number) {
     return {
       mem: total && avail !== null ? round(100 * (1 - avail / total)) : null,
       swap: swapTotal !== null && swapFree !== null ? round((swapTotal - swapFree) / 1024) : null,
-      swapOut: outs !== null && pageSize ? outs * pageSize : null,
+      swapOut: outs !== null && page ? outs * page : null,
     };
   }
 
@@ -268,6 +275,7 @@ export function createCollector(diskPath: string, intervalMs: number) {
   // from /proc/<pid>/stat clock ticks between two calls.
   async function linuxProcs(now: number): Promise<Proc[] | null> {
     const { hz, page } = await sysconf();
+    if (!page) return null; // memory per process can't be worked out without the page size
     let pids: string[];
     try {
       pids = (await fs.promises.readdir('/proc')).filter((d) => /^\d+$/.test(d));
