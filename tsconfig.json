@@ -1,0 +1,19 @@
+{
+  // Type checking only (npm run check). Node strips the types itself, in development and in scripts/build.ts.
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2023"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "test", "scripts", "public/lib"]
+}

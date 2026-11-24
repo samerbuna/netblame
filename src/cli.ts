@@ -30,7 +30,7 @@ function openPage(cfg: Config): void {
 async function alreadyRunning(cfg: Config): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${cfg.port}/health`, { signal: AbortSignal.timeout(1000) });
-    return res.ok && (await res.json()).app === APP;
+    return res.ok && ((await res.json()) as { app?: string }).app === APP;
   } catch {
     return false;
   }

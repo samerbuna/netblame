@@ -18,7 +18,7 @@ export function dayStamp(t: number): string {
 
 export const dayName = (t: number, suffix = '') => `${dayStamp(t)}${suffix}.jsonl`;
 
-export async function persist(dir: string, x: { t: number }, suffix = ''): Promise<void> {
+export async function persist<T extends { t: number }>(dir: string, x: T, suffix = ''): Promise<void> {
   try {
     await fs.promises.appendFile(path.join(dir, dayName(x.t, suffix)), JSON.stringify(x) + '\n');
   } catch (err) {

@@ -1,11 +1,43 @@
 {
   "name": "is-it-me",
   "version": "0.1.0",
-  "private": true,
+  "description": "Is it me, or the internet? A local page that says whether your Wi-Fi, router, ISP, DNS or this machine is the problem.",
+  "keywords": [
+    "network",
+    "monitor",
+    "internet",
+    "outage",
+    "wifi",
+    "uptime",
+    "latency",
+    "bufferbloat",
+    "cli"
+  ],
   "type": "module",
-  "engines": { "node": "^22.18 || >=23.6" },
+  "bin": {
+    "is-it-me": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "public"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
   "scripts": {
     "start": "node src/cli.ts",
-    "test": "node --test test/*.test.ts"
+    "dev": "node --watch src/cli.ts run",
+    "build": "node --disable-warning=ExperimentalWarning scripts/build.ts",
+    "check": "tsc",
+    "test": "node --test test/*.test.ts",
+    "prepack": "npm run check && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
   }
 }
