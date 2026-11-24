@@ -106,8 +106,9 @@ function httpCheck(timeoutMs: number): Promise<HttpResult> {
       const code = res.statusCode ?? 0;
       const ok = code === 204;
       // A page or redirect instead of the empty 204 means something intercepted the request.
-      // A 5xx is the check server failing, which is a failed check, not a portal.
-      finish({ ms: ok ? round(performance.now() - t0) : null, portal: !ok && code < 500 });
+      // A 5xx is the check server failing, which is a failed check, not a portal,
+      // except 511 (Network Authentication Required), the status meant for portals.
+      finish({ ms: ok ? round(performance.now() - t0) : null, portal: !ok && (code < 500 || code === 511) });
     });
     req.on('error', () => finish({ ms: null, portal: false }));
     const timer = setTimeout(() => finish({ ms: null, portal: false }), timeoutMs);
